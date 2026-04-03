@@ -336,6 +336,7 @@ function App() {
   }, [])
 
   useEffect(() => {
+    console.log('[Arc] isAuthed changed:', isAuthed, 'userRole:', userRole)
     if (!isAuthed) return
     void reloadAll()
   }, [isAuthed])
@@ -376,8 +377,10 @@ function App() {
   }
 
   async function reloadAll(): Promise<void> {
+    console.log('[Arc] reloadAll start')
     setBusy(true)
 
+    try {
     const txRes = await supabase
       .from('dpt_transactions')
       .select(
@@ -385,6 +388,8 @@ function App() {
       )
       .order('created_at', { ascending: false })
       .limit(300)
+
+    console.log('[Arc] txRes:', { error: txRes.error?.message, count: txRes.data?.length })
 
     if (txRes.error) {
       setBusy(false)
@@ -507,6 +512,11 @@ function App() {
     }
 
     setBusy(false)
+    console.log('[Arc] reloadAll done')
+    } catch (err) {
+      console.error('[Arc] reloadAll CRASHED:', err)
+      setBusy(false)
+    }
   }
 
   function generateRandomKey(prefix: string): string {
