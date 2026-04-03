@@ -301,7 +301,10 @@ function App() {
   }, [flash])
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
+    console.log('[Arc] Init: checking session...')
+    console.log('[Arc] localStorage keys:', Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('sb-')))
+    supabase.auth.getSession().then(async ({ data, error: sessionError }) => {
+      console.log('[Arc] getSession result:', { hasSession: Boolean(data.session), email: data.session?.user?.email, error: sessionError })
       const email = data.session?.user?.email || ''
       setSessionEmail(email)
       setIsAuthed(Boolean(data.session))
@@ -310,6 +313,7 @@ function App() {
         console.log('[Arc] dpt_current_role response:', { roleData, roleError, uid: data.session.user.id })
         setUserRole(resolveUserRole(roleData))
       } else {
+        console.log('[Arc] No session after getSession — user appears logged out')
         setUserRole('unknown')
       }
     })
