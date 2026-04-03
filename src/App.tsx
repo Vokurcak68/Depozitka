@@ -473,27 +473,33 @@ function App() {
       })))
     }
 
-    // load api keys
-    const akRes = await supabase
-      .from('dpt_api_keys')
-      .select('id, marketplace_id, key_prefix, scopes, active, label, last_used_at, expires_at, revoked_at, revoked_reason, created_at')
-      .order('created_at', { ascending: false })
-      .limit(100)
+    // load api keys (non-critical — table may not exist yet)
+    try {
+      const akRes = await supabase
+        .from('dpt_api_keys')
+        .select('id, marketplace_id, key_prefix, scopes, active, label, last_used_at, expires_at, revoked_at, revoked_reason, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100)
 
-    if (!akRes.error) {
-      setApiKeys((akRes.data || []).map((r: any) => ({
-        id: r.id,
-        marketplaceId: r.marketplace_id,
-        keyPrefix: r.key_prefix,
-        scopes: r.scopes || [],
-        active: Boolean(r.active),
-        label: r.label || '',
-        lastUsedAt: r.last_used_at || null,
-        expiresAt: r.expires_at || null,
-        revokedAt: r.revoked_at || null,
-        revokedReason: r.revoked_reason || null,
-        createdAt: r.created_at,
-      })))
+      if (!akRes.error) {
+        setApiKeys((akRes.data || []).map((r: any) => ({
+          id: r.id,
+          marketplaceId: r.marketplace_id,
+          keyPrefix: r.key_prefix,
+          scopes: r.scopes || [],
+          active: Boolean(r.active),
+          label: r.label || '',
+          lastUsedAt: r.last_used_at || null,
+          expiresAt: r.expires_at || null,
+          revokedAt: r.revoked_at || null,
+          revokedReason: r.revoked_reason || null,
+          createdAt: r.created_at,
+        })))
+      } else {
+        console.warn('[Arc] dpt_api_keys load skipped:', akRes.error.message)
+      }
+    } catch (e) {
+      console.warn('[Arc] dpt_api_keys load failed:', e)
     }
 
     setBusy(false)
