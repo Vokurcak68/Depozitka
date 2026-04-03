@@ -100,7 +100,7 @@ function maskIban(v: string): string { const s = normalizeIban(v); if (!s) retur
 function payoutSourceLabel(v: string): string { return ({ marketplace_api: 'Marketplace API', seller_portal: 'Seller portal', admin_override: 'Admin override' } as Record<string,string>)[v] || v || '-' }
 function roleLabel(role: UserRole): string { return ({ admin: 'Admin', support: 'Support', buyer: 'Kupující', seller: 'Prodejce', service: 'Service', unknown: 'Neznámá role' } as Record<UserRole, string>)[role] }
 function canUseAdminTabs(role: UserRole): boolean { return role === 'admin' || role === 'support' }
-function canUseSellerSelfService(role: UserRole): boolean { return role === 'seller' || role === 'admin' || role === 'support' }
+function canUseSellerSelfService(role: UserRole): boolean { return role === 'seller' }
 function resolveUserRole(value: string | null | undefined): UserRole {
   const v = (value || '').trim().toLowerCase()
   if (v === 'admin' || v === 'support' || v === 'buyer' || v === 'seller' || v === 'service') return v
@@ -516,7 +516,7 @@ function App() {
     const bic = sellerSelfServiceForm.bic.trim().toUpperCase()
 
     if (!canUseSellerSelfService(userRole)) {
-      notify('error', 'Self-service je jen pro seller/admin/support.')
+      notify('error', 'Self-service je jen pro roli seller.')
       return
     }
 
@@ -820,7 +820,7 @@ Body:
                 <h3>Seller portal fallback endpoint</h3>
                 <ul>
                   <li>RPC: <code>dpt_seller_portal_set_payout_account</code></li>
-                  <li>Guardy: role seller/admin/support, validace IBAN/BIC, rate limit</li>
+                  <li>Guardy: pouze role seller, validace IBAN/BIC, rate limit</li>
                   <li>Respektuje lock po <code>paid</code> (enforce v DB funkci)</li>
                 </ul>
                 <pre className="contractCode">{`POST ${import.meta.env.VITE_SUPABASE_URL || '<SUPABASE_URL>'}/rest/v1/rpc/dpt_seller_portal_set_payout_account
@@ -844,7 +844,7 @@ Body:
           <section className="panel sellerPortalPanel">
             <h2>Seller self-service (mimo admin)</h2>
             <p className="muted">Minimální flow: seller si může sám doplnit payout účet bez admin zásahu.</p>
-            {!canUseSellerSelfService(userRole) && <p className="hint" style={{ color: '#ef4444' }}>Aktuální role ({roleLabel(userRole)}) nemá právo volat seller self-service endpoint.</p>}
+            {!canUseSellerSelfService(userRole) && <p className="hint" style={{ color: '#ef4444' }}>Aktuální role ({roleLabel(userRole)}) nemá právo volat seller self-service endpoint. Potřebná role: seller.</p>}
             <div className="formGrid">
               <label>
                 Transakce
