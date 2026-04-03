@@ -17,6 +17,8 @@ type EscrowStatus =
   | 'payout_sent'
   | 'payout_confirmed'
 
+type Theme = 'light' | 'dark'
+
 interface Transaction {
   id: string
   transactionCode: string
@@ -102,6 +104,12 @@ function isCriticalTransition(target: EscrowStatus): boolean {
   return ['refunded', 'cancelled', 'payout_sent'].includes(target)
 }
 
+function resolveInitialTheme(): Theme {
+  const saved = localStorage.getItem('depozitka-theme')
+  if (saved === 'light' || saved === 'dark') return saved
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 function App() {
   const [tab, setTab] = useState<'dashboard' | 'emails'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
@@ -109,6 +117,7 @@ function App() {
   const [isAuthed, setIsAuthed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [theme, setTheme] = useState<Theme>(resolveInitialTheme)
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [events, setEvents] = useState<TxEvent[]>([])
@@ -124,9 +133,15 @@ function App() {
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
 
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | EscrowStatus>('all')
+
+  useEffect(() => {
+    localStorage.setItem('depozitka-theme', theme)
+    document.body.style.background = theme === 'dark' ? '#020617' : '#f8fafc'
+  }, [theme])
 
   useEffect(() => {
     if (!flash) return
@@ -184,6 +199,7 @@ function App() {
     setTransactions([])
     setEvents([])
     setEmailLogs([])
+    setSelectedTx(null)
     setFlash(null)
   }
 
@@ -379,24 +395,34 @@ function App() {
     [filteredTransactions],
   )
 
+  const selectedTxEvents = useMemo(() => {
+    if (!selectedTx) return []
+    return events.filter((event) => event.transactionCode === selectedTx.transactionCode)
+  }, [events, selectedTx])
+
   return (
-    <div className="app">
+    <div className={`app theme-${theme}`}>
       <header className="hero">
         <div>
           <span className="brandBadge">🛡️ Depozitka · Trust Clean</span>
           <h1>Depozitka Core</h1>
           <p>Bezpečná escrow administrativa s důrazem na jasný stav, audit a rychlé rozhodování.</p>
         </div>
-        {isAuthed && (
-          <div className="heroActions">
-            <button className="btn btnGhost" onClick={() => void reloadAll()} disabled={busy}>
-              Obnovit data
-            </button>
-            <button className="btn btnGhost" onClick={() => void signOut()} disabled={busy}>
-              Odhlásit
-            </button>
-          </div>
-        )}
+        <div className="heroActions">
+          <button className="btn btnGhost" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+            {theme === 'light' ? '🌙 Dark mode' : '☀️ Light mode'}
+          </button>
+          {isAuthed && (
+            <>
+              <button className="btn btnGhost" onClick={() => void reloadAll()} disabled={busy}>
+                Obnovit data
+              </button>
+              <button className="btn btnGhost" onClick={() => void signOut()} disabled={busy}>
+                Odhlásit
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       <section className="trustStrip">
@@ -411,10 +437,19 @@ function App() {
         </div>
       </section>
 
+      {!isAuthed && (
+        <LandingSection
+          onLoginClick={() => {
+            const element = document.getElementById('login-panel')
+            element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
+        />
+      )}
+
       {flash && <div className={`flash ${flash.type}`}>{flash.text}</div>}
 
       {!isAuthed ? (
-        <section className="panel authPanel">
+        <section className="panel authPanel" id="login-panel">
           <h2>Přihlášení do adminu</h2>
           <p className="hint">Přihlas se účtem, který má roli admin/support v `dpt_profiles`.</p>
           <div className="formGrid">
@@ -516,6 +551,7 @@ function App() {
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
+                        onOpenDetail={() => setSelectedTx(tx)}
                       />
                     ))}
                   </div>
@@ -531,6 +567,7 @@ function App() {
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
+                        onOpenDetail={() => setSelectedTx(tx)}
                       />
                     ))}
                   </div>
@@ -546,6 +583,7 @@ function App() {
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
+                        onOpenDetail={() => setSelectedTx(tx)}
                       />
                     ))}
                   </div>
@@ -616,6 +654,19 @@ function App() {
         </>
       )}
 
+      {selectedTx && (
+        <TxDrawer
+          tx={selectedTx}
+          events={selectedTxEvents}
+          change={statusChange[selectedTx.id] || ''}
+          note={statusNote[selectedTx.id] || ''}
+          onClose={() => setSelectedTx(null)}
+          onChange={(value) => setStatusChange((prev) => ({ ...prev, [selectedTx.id]: value }))}
+          onNote={(value) => setStatusNote((prev) => ({ ...prev, [selectedTx.id]: value }))}
+          onApply={() => void requestStatusChange(selectedTx)}
+        />
+      )}
+
       {pendingAction && (
         <ConfirmModal
           title="Potvrzení kritické akce"
@@ -631,6 +682,53 @@ function App() {
         />
       )}
     </div>
+  )
+}
+
+function LandingSection({ onLoginClick }: { onLoginClick: () => void }) {
+  return (
+    <section className="landing panel">
+      <div className="landingHero">
+        <div>
+          <h2>Escrow, které je srozumitelné i pro běžné uživatele</h2>
+          <p>
+            Depozitka oddělí peníze od marketplace, vede jasný průběh transakce a chrání kupujícího i prodávajícího.
+          </p>
+          <div className="landingActions">
+            <button className="btn btnPrimary" onClick={onLoginClick}>
+              Vstoupit do adminu
+            </button>
+            <a className="btn btnSecondary linkButton" href="#">
+              Dokumentace API (coming soon)
+            </a>
+          </div>
+        </div>
+        <div className="landingCard">
+          <h3>Flow v kostce</h3>
+          <ol>
+            <li>Marketplace založí transakci</li>
+            <li>Kupující zaplatí do úschovy</li>
+            <li>Prodávající odešle zásilku</li>
+            <li>Po potvrzení doručení jde výplata prodejci</li>
+          </ol>
+        </div>
+      </div>
+
+      <div className="landingFeatures">
+        <article>
+          <h3>🔌 Integrace pro marketplace</h3>
+          <p>Jednotný escrow engine pro více tržišť, pilotně napojený Test Bazar.</p>
+        </article>
+        <article>
+          <h3>🧾 Audit a dohledatelnost</h3>
+          <p>Každá změna stavu i notifikace mají stopu pro interní i právní potřeby.</p>
+        </article>
+        <article>
+          <h3>⚖️ Sporové řízení</h3>
+          <p>Spory, hold a refund workflow jsou řízené a vynucují odůvodnění kritických kroků.</p>
+        </article>
+      </div>
+    </section>
   )
 }
 
@@ -658,6 +756,7 @@ function TxCard({
   onChange,
   onNote,
   onApply,
+  onOpenDetail,
 }: {
   tx: Transaction
   change: EscrowStatus | ''
@@ -665,6 +764,7 @@ function TxCard({
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
   onApply: () => void
+  onOpenDetail: () => void
 }) {
   const nextOptions = allowedTransitions[tx.status]
 
@@ -702,11 +802,113 @@ function TxCard({
           ))}
         </select>
         <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
-        <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
-          Potvrdit změnu
-        </button>
+        <div className="txButtons">
+          <button className="btn btnSecondary" onClick={onOpenDetail}>
+            Detail
+          </button>
+          <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
+            Potvrdit změnu
+          </button>
+        </div>
       </div>
     </article>
+  )
+}
+
+function TxDrawer({
+  tx,
+  events,
+  change,
+  note,
+  onClose,
+  onChange,
+  onNote,
+  onApply,
+}: {
+  tx: Transaction
+  events: TxEvent[]
+  change: EscrowStatus | ''
+  note: string
+  onClose: () => void
+  onChange: (value: EscrowStatus | '') => void
+  onNote: (value: string) => void
+  onApply: () => void
+}) {
+  const nextOptions = allowedTransitions[tx.status]
+
+  return (
+    <div className="drawerOverlay" role="presentation" onClick={onClose}>
+      <aside className="drawer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="drawerHead">
+          <h3>{tx.transactionCode}</h3>
+          <button className="btn btnSecondary" onClick={onClose}>
+            Zavřít
+          </button>
+        </div>
+
+        <div className="drawerSection">
+          <p>
+            <strong>Order:</strong> {tx.externalOrderId}
+          </p>
+          <p>
+            <strong>Stav:</strong> {statusLabel[tx.status]}
+          </p>
+          <p>
+            <strong>Kupující:</strong> {tx.buyerName} ({tx.buyerEmail})
+          </p>
+          <p>
+            <strong>Prodávající:</strong> {tx.sellerName} ({tx.sellerEmail})
+          </p>
+          <p>
+            <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
+            <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
+          </p>
+          <p>
+            <strong>Update:</strong> {formatDate(tx.updatedAt)}
+          </p>
+        </div>
+
+        <div className="drawerSection">
+          <h4>Rychlá akce</h4>
+          <div className="txActions">
+            <select value={change} onChange={(e) => onChange((e.target.value as EscrowStatus) || '')}>
+              <option value="">Zvol nový stav</option>
+              {nextOptions.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel[status]}
+                </option>
+              ))}
+            </select>
+            <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
+            <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
+              Potvrdit změnu
+            </button>
+          </div>
+        </div>
+
+        <div className="drawerSection">
+          <h4>Timeline ({events.length})</h4>
+          {events.length === 0 ? (
+            <p className="hint">Zatím bez eventů.</p>
+          ) : (
+            <ul className="timeline">
+              {events.map((event) => (
+                <li key={event.id}>
+                  <div>
+                    <strong>{event.eventType}</strong>
+                    <p>
+                      {event.oldStatus || '-'} → {event.newStatus || '-'}
+                    </p>
+                    {event.note && <p>{event.note}</p>}
+                  </div>
+                  <span>{formatDate(event.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </aside>
+    </div>
   )
 }
 

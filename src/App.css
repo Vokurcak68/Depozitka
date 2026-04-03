@@ -1,12 +1,36 @@
 :root {
   color-scheme: light;
+  --bg: #f8fafc;
+  --text: #0f172a;
+  --muted: #64748b;
+  --panel-bg: #ffffff;
+  --panel-border: #e2e8f0;
+  --input-bg: #ffffff;
+  --shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  --hero-btn-border: rgba(255, 255, 255, 0.65);
+  --hero-btn-bg: rgba(255, 255, 255, 0.15);
+}
+
+.theme-dark {
+  color-scheme: dark;
+  --bg: #020617;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --panel-bg: #0f172a;
+  --panel-border: #1e293b;
+  --input-bg: #0b1222;
+  --shadow: 0 4px 18px rgba(2, 6, 23, 0.42);
+  --hero-btn-border: rgba(148, 163, 184, 0.45);
+  --hero-btn-bg: rgba(15, 23, 42, 0.35);
 }
 
 .app {
   max-width: 1360px;
   margin: 0 auto;
   padding: 24px;
-  color: #0f172a;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
 }
 
 .hero {
@@ -50,6 +74,7 @@
 .heroActions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .trustStrip {
@@ -60,12 +85,93 @@
 }
 
 .trustStrip > div {
-  background: #ffffff;
+  background: var(--panel-bg);
   border: 1px solid #dbeafe;
   border-radius: 12px;
   padding: 10px 12px;
   color: #1e3a8a;
   font-size: 13px;
+}
+
+.theme-dark .trustStrip > div {
+  color: #bfdbfe;
+  border-color: #1d4ed8;
+}
+
+.landing {
+  margin-bottom: 14px;
+}
+
+.landingHero {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.landingHero h2 {
+  margin: 0 0 10px;
+  font-size: 28px;
+}
+
+.landingHero p {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.landingActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.linkButton {
+  text-decoration: none;
+}
+
+.landingCard {
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: rgba(37, 99, 235, 0.06);
+  padding: 12px;
+}
+
+.theme-dark .landingCard {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.landingCard h3 {
+  margin: 0 0 8px;
+}
+
+.landingCard ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.landingFeatures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.landingFeatures article {
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--panel-bg);
+}
+
+.landingFeatures h3 {
+  margin: 0 0 8px;
+}
+
+.landingFeatures p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .tabs {
@@ -75,9 +181,9 @@
 }
 
 .tabs button {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f172a;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  color: var(--text);
   border-radius: 12px;
   padding: 10px 14px;
   cursor: pointer;
@@ -91,16 +197,17 @@
 }
 
 .panel {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--panel-border);
   border-radius: 16px;
   padding: 16px;
-  background: #fff;
+  background: var(--panel-bg);
   margin-bottom: 14px;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow);
 }
 
 .panel h2,
-.panel h3 {
+.panel h3,
+.panel h4 {
   margin: 0 0 10px;
 }
 
@@ -116,16 +223,16 @@
 }
 
 .statCard {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--panel-border);
   border-radius: 14px;
-  background: #fff;
+  background: var(--panel-bg);
   padding: 12px;
   display: grid;
   gap: 6px;
 }
 
 .statCard span {
-  color: #475569;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -137,16 +244,25 @@
 .statCard.danger {
   background: #fef2f2;
   border-color: #fecaca;
+  color: #7f1d1d;
 }
 
 .statCard.info {
   background: #eff6ff;
   border-color: #bfdbfe;
+  color: #1e3a8a;
 }
 
 .statCard.success {
   background: #ecfdf5;
   border-color: #a7f3d0;
+  color: #14532d;
+}
+
+.theme-dark .statCard.danger,
+.theme-dark .statCard.info,
+.theme-dark .statCard.success {
+  color: inherit;
 }
 
 .formGrid {
@@ -165,11 +281,12 @@ label {
 
 input,
 select {
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--panel-border);
   border-radius: 12px;
   padding: 10px 11px;
   font: inherit;
-  background: #fff;
+  background: var(--input-bg);
+  color: var(--text);
 }
 
 input:focus,
@@ -197,8 +314,8 @@ select:focus {
 }
 
 .group {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: color-mix(in srgb, var(--panel-bg) 92%, #e2e8f0 8%);
+  border: 1px solid var(--panel-border);
   border-radius: 14px;
   padding: 10px;
   min-height: 220px;
@@ -210,10 +327,14 @@ select:focus {
 
 .txCard {
   border: 1px solid #dbeafe;
-  background: #fff;
+  background: var(--panel-bg);
   border-radius: 12px;
   padding: 10px;
   margin-bottom: 10px;
+}
+
+.theme-dark .txCard {
+  border-color: #334155;
 }
 
 .txCard p {
@@ -235,6 +356,11 @@ select:focus {
   margin-top: 8px;
 }
 
+.txButtons {
+  display: flex;
+  gap: 8px;
+}
+
 .status {
   font-size: 12px;
   font-weight: 700;
@@ -245,22 +371,27 @@ select:focus {
 
 .status.created {
   background: #e2e8f0;
+  color: #0f172a;
 }
 
 .status.partial_paid {
   background: #e0f2fe;
+  color: #0c4a6e;
 }
 
 .status.paid {
   background: #dbeafe;
+  color: #1e3a8a;
 }
 
 .status.shipped {
   background: #fef3c7;
+  color: #78350f;
 }
 
 .status.delivered {
   background: #ede9fe;
+  color: #4c1d95;
 }
 
 .status.completed,
@@ -268,6 +399,7 @@ select:focus {
 .status.payout_confirmed,
 .status.payout_sent {
   background: #dcfce7;
+  color: #14532d;
 }
 
 .status.disputed,
@@ -275,6 +407,7 @@ select:focus {
 .status.refunded,
 .status.cancelled {
   background: #fee2e2;
+  color: #7f1d1d;
 }
 
 .tableWrap {
@@ -290,7 +423,7 @@ table {
 
 th,
 td {
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--panel-border);
   padding: 8px;
   text-align: left;
   font-size: 13px;
@@ -321,9 +454,9 @@ td {
 }
 
 .btnSecondary {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f172a;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  color: var(--text);
 }
 
 .btnDanger {
@@ -336,15 +469,15 @@ td {
 }
 
 .btnGhost {
-  border: 1px solid rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--hero-btn-border);
   border-radius: 12px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--hero-btn-bg);
   color: #fff;
 }
 
 .hint {
-  color: #64748b;
+  color: var(--muted);
   margin: 0 0 10px;
 }
 
@@ -367,7 +500,8 @@ td {
   border: 1px solid #fecaca;
 }
 
-.modalOverlay {
+.modalOverlay,
+.drawerOverlay {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.46);
@@ -379,9 +513,9 @@ td {
 
 .modal {
   width: min(520px, 100%);
-  background: #fff;
+  background: var(--panel-bg);
   border-radius: 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--panel-border);
   padding: 16px;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
 }
@@ -401,8 +535,67 @@ td {
   gap: 8px;
 }
 
+.drawerOverlay {
+  place-items: stretch end;
+  padding: 0;
+}
+
+.drawer {
+  height: 100vh;
+  width: min(620px, 100%);
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-border);
+  box-shadow: -10px 0 30px rgba(2, 6, 23, 0.24);
+  overflow: auto;
+  padding: 16px;
+}
+
+.drawerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.drawerHead h3 {
+  margin: 0;
+}
+
+.drawerSection {
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.drawerSection p {
+  margin: 4px 0;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline li {
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.timeline li > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 code {
-  background: #e2e8f0;
+  background: color-mix(in srgb, var(--panel-bg) 80%, #94a3b8 20%);
   padding: 2px 5px;
   border-radius: 5px;
 }
@@ -410,6 +603,10 @@ code {
 @media (max-width: 1220px) {
   .statsGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .landingFeatures {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -423,11 +620,16 @@ code {
     width: 100%;
   }
 
+  .landingHero,
   .formGrid,
   .groupWrap,
   .filtersRow,
   .statsGrid,
   .trustStrip {
     grid-template-columns: 1fr;
+  }
+
+  .txButtons {
+    flex-direction: column;
   }
 }
