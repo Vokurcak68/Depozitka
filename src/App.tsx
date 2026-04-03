@@ -348,8 +348,9 @@ function App() {
     <div className="app">
       <header className="hero">
         <div>
+          <span className="brandBadge">🛡️ Depozitka · Trust Clean</span>
           <h1>Depozitka Core</h1>
-          <p>Uživatelsky přívětivý admin panel pro escrow transakce, spory, výplaty a audit.</p>
+          <p>Bezpečná escrow administrativa s důrazem na jasný stav, audit a rychlé rozhodování.</p>
         </div>
         {isAuthed && (
           <div className="heroActions">
@@ -362,6 +363,12 @@ function App() {
           </div>
         )}
       </header>
+
+      <section className="trustStrip">
+        <div><strong>🔒 Důvěra:</strong> kritické akce mají důvod + audit stopu</div>
+        <div><strong>⚡ Rychlost:</strong> pipeline K řešení / V procesu / Ukončeno</div>
+        <div><strong>📬 Transparentnost:</strong> email logy a eventy na jednom místě</div>
+      </section>
 
       {!isAuthed ? (
         <section className="panel authPanel">

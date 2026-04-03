@@ -33,6 +33,37 @@
   max-width: 760px;
 }
 
+
+.brandBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.trustStrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.trustStrip > div {
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #1e3a8a;
+  font-size: 13px;
+}
+
 .heroActions {
   display: flex;
   gap: 8px;
@@ -314,7 +345,8 @@ code {
   .formGrid,
   .groupWrap,
   .filtersRow,
-  .statsGrid {
+  .statsGrid,
+  .trustStrip {
     grid-template-columns: 1fr;
   }
 }
