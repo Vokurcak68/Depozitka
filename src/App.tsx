@@ -137,6 +137,7 @@ function App() {
   const [sellerName, setSellerName] = useState('LokoTom')
   const [sellerEmail, setSellerEmail] = useState('seller@test.cz')
   const [amount, setAmount] = useState(1490)
+  const [showCreateForm, setShowCreateForm] = useState(false)
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
@@ -320,6 +321,7 @@ function App() {
     }
 
     notify('success', 'Transakce byla založena.')
+    setShowCreateForm(false)
     await reloadAll()
   }
 
@@ -531,37 +533,51 @@ function App() {
                 <StatCard label="Objem transakcí" value={formatPrice(summary.totalVolume)} tone="neutral" />
               </section>
 
-              <section className="panel">
-                <h2>Vytvořit novou transakci</h2>
-                <div className="formGrid">
-                  <label>
-                    External order ID
-                    <input value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)} />
-                  </label>
-                  <label>
-                    Buyer name
-                    <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
-                  </label>
-                  <label>
-                    Buyer email
-                    <input type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
-                  </label>
-                  <label>
-                    Seller name
-                    <input value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
-                  </label>
-                  <label>
-                    Seller email
-                    <input type="email" value={sellerEmail} onChange={(e) => setSellerEmail(e.target.value)} />
-                  </label>
-                  <label>
-                    Amount (Kč)
-                    <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
-                  </label>
+              <section className="panel createPanel">
+                <div className="createPanelHead">
+                  <h2>Nová transakce</h2>
+                  <button
+                    type="button"
+                    className="btn btnSecondary"
+                    onClick={() => setShowCreateForm((prev) => !prev)}
+                  >
+                    {showCreateForm ? 'Skrýt formulář' : 'Vytvořit novou transakci'}
+                  </button>
                 </div>
-                <button className="btn btnPrimary" onClick={() => void createTransaction()} disabled={busy}>
-                  {busy ? 'Vytvářím…' : 'Vytvořit transakci'}
-                </button>
+
+                {showCreateForm && (
+                  <div className="createPanelBody">
+                    <div className="formGrid">
+                      <label>
+                        External order ID
+                        <input value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)} />
+                      </label>
+                      <label>
+                        Buyer name
+                        <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
+                      </label>
+                      <label>
+                        Buyer email
+                        <input type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
+                      </label>
+                      <label>
+                        Seller name
+                        <input value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
+                      </label>
+                      <label>
+                        Seller email
+                        <input type="email" value={sellerEmail} onChange={(e) => setSellerEmail(e.target.value)} />
+                      </label>
+                      <label>
+                        Amount (Kč)
+                        <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
+                      </label>
+                    </div>
+                    <button className="btn btnPrimary" onClick={() => void createTransaction()} disabled={busy}>
+                      {busy ? 'Vytvářím…' : 'Vytvořit transakci'}
+                    </button>
+                  </div>
+                )}
               </section>
 
               <section className="panel">
