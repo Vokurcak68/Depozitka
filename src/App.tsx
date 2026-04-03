@@ -84,8 +84,29 @@ interface SellerPayoutForm {
   transactionCode: string; iban: string; accountName: string; bic: string
 }
 
+interface ApiKey {
+  id: string
+  marketplaceId: string
+  keyPrefix: string
+  scopes: string[]
+  active: boolean
+  label: string
+  lastUsedAt: string | null
+  expiresAt: string | null
+  revokedAt: string | null
+  revokedReason: string | null
+  createdAt: string
+}
+
+interface ApiKeyCreateForm {
+  label: string
+  scopes: string
+  expiresInDays: string
+}
+
 const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '' }
 const emptySpForm: SellerPayoutForm = { transactionCode: '', iban: '', accountName: '', bic: '' }
+const emptyApiKeyForm: ApiKeyCreateForm = { label: '', scopes: 'transactions:create,transactions:read', expiresInDays: '' }
 
 function normalizeIban(v: string): string { return v.replace(/\s+/g, '').toUpperCase() }
 function maskIban(v: string): string { const s = normalizeIban(v); if (!s) return '-'; return s.length <= 8 ? s : `${s.slice(0,4)}****${s.slice(-4)}` }
@@ -250,6 +271,10 @@ function App() {
   const [marketplaceCode, setMarketplaceCode] = useState('')
   const [marketplaceForm, setMarketplaceForm] = useState<MarketplaceForm>(emptyMpForm)
   const [marketplaceBusy, setMarketplaceBusy] = useState(false)
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
+  const [apiKeyForm, setApiKeyForm] = useState<ApiKeyCreateForm>({ ...emptyApiKeyForm })
+  const [apiKeyBusy, setApiKeyBusy] = useState(false)
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null)
   const [sellerFallbackForm, setSellerFallbackForm] = useState<SellerPayoutForm>(emptySpForm)
   const [sellerFallbackBusy, setSellerFallbackBusy] = useState(false)
 
@@ -446,10 +471,92 @@ function App() {
       })))
     }
 
+    // load api keys
+    const akRes = await supabase
+      .from('dpt_api_keys')
+      .select('id, marketplace_id, key_prefix, scopes, active, label, last_used_at, expires_at, revoked_at, revoked_reason, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100)
+
+    if (!akRes.error) {
+      setApiKeys((akRes.data || []).map((r: any) => ({
+        id: r.id,
+        marketplaceId: r.marketplace_id,
+        keyPrefix: r.key_prefix,
+        scopes: r.scopes || [],
+        active: Boolean(r.active),
+        label: r.label || '',
+        lastUsedAt: r.last_used_at || null,
+        expiresAt: r.expires_at || null,
+        revokedAt: r.revoked_at || null,
+        revokedReason: r.revoked_reason || null,
+        createdAt: r.created_at,
+      })))
+    }
+
     setBusy(false)
   }
 
-  function onMarketplacePick(code: string): void {
+  function generateRandomKey(prefix: string): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    let result = prefix
+    for (let i = 0; i < 40; i++) result += chars.charAt(Math.floor(Math.random() * chars.length))
+    return result
+  }
+
+  async function createApiKey(): Promise<void> {
+    if (!marketplaceCode) {
+      notify('error', 'Nejdřív vyber marketplace.')
+      return
+    }
+    const mp = marketplaces.find((m) => m.code === marketplaceCode)
+    if (!mp) { notify('error', 'Marketplace nenalezen.'); return }
+
+    const label = apiKeyForm.label.trim() || `Key for ${mp.name}`
+    const scopes = apiKeyForm.scopes.split(',').map((s) => s.trim()).filter(Boolean)
+    if (scopes.length === 0) { notify('error', 'Zadej alespoň jeden scope.'); return }
+
+    const prefix = `dpt_live_${mp.code.slice(0, 8)}_`
+    const rawKey = generateRandomKey(prefix)
+
+    setApiKeyBusy(true)
+    const { error } = await supabase.rpc('dpt_generate_api_key', {
+      p_marketplace_id: mp.id,
+      p_key_prefix: prefix,
+      p_raw_key: rawKey,
+      p_scopes: scopes,
+      p_label: label,
+      p_expires_in_days: apiKeyForm.expiresInDays ? parseInt(apiKeyForm.expiresInDays, 10) : null,
+    })
+    setApiKeyBusy(false)
+
+    if (error) {
+      notify('error', `Generování klíče: ${error.message}`)
+      return
+    }
+
+    setGeneratedKey(rawKey)
+    setApiKeyForm({ ...emptyApiKeyForm })
+    notify('success', 'API klíč vygenerován. Zkopíruj ho — nebude znovu zobrazen!')
+    await reloadAll()
+  }
+
+  async function revokeApiKey(keyId: string, reason: string): Promise<void> {
+    const { error } = await supabase
+      .from('dpt_api_keys')
+      .update({ active: false, revoked_at: new Date().toISOString(), revoked_reason: reason || 'Revoked by admin' })
+      .eq('id', keyId)
+
+    if (error) {
+      notify('error', `Revoke: ${error.message}`)
+      return
+    }
+
+    notify('success', 'API klíč zrušen.')
+    await reloadAll()
+  }
+
+    function onMarketplacePick(code: string): void {
     setMarketplaceCode(code)
     const m = marketplaces.find((x) => x.code === code)
     if (m) {
@@ -1028,6 +1135,91 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              <hr className="sectionDivider" />
+
+              <h2>API klíče {marketplaceCode ? `— ${marketplaceCode}` : ''}</h2>
+              {!marketplaceCode && <p className="hint">Vyber marketplace vlevo pro správu klíčů.</p>}
+
+              {marketplaceCode && (
+                <>
+                  <div className="apiKeysTable">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Prefix</th>
+                          <th>Label</th>
+                          <th>Scopes</th>
+                          <th>Stav</th>
+                          <th>Poslední použití</th>
+                          <th>Expirace</th>
+                          <th>Akce</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {apiKeys
+                          .filter((k) => {
+                            const mp = marketplaces.find((m) => m.code === marketplaceCode)
+                            return mp && k.marketplaceId === mp.id
+                          })
+                          .map((k) => (
+                            <tr key={k.id} className={k.revokedAt ? 'revoked' : ''}>
+                              <td><code>{k.keyPrefix}***</code></td>
+                              <td>{k.label || '-'}</td>
+                              <td className="scopesList">{k.scopes.join(', ')}</td>
+                              <td>{k.revokedAt ? '🔴 Zrušen' : k.active ? '🟢 Aktivní' : '⚪ Neaktivní'}</td>
+                              <td>{k.lastUsedAt ? formatDate(k.lastUsedAt) : 'Nikdy'}</td>
+                              <td>{k.expiresAt ? formatDate(k.expiresAt) : 'Bez expirace'}</td>
+                              <td>
+                                {!k.revokedAt && (
+                                  <button
+                                    className="btn btnDanger btnSm"
+                                    onClick={() => {
+                                      const reason = prompt('Důvod zrušení klíče:')
+                                      if (reason !== null) void revokeApiKey(k.id, reason)
+                                    }}
+                                  >
+                                    Revoke
+                                  </button>
+                                )}
+                                {k.revokedAt && <span className="muted">{k.revokedReason || '-'}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        {apiKeys.filter((k) => {
+                          const mp = marketplaces.find((m) => m.code === marketplaceCode)
+                          return mp && k.marketplaceId === mp.id
+                        }).length === 0 && (
+                          <tr><td colSpan={7} className="hint">Žádné API klíče pro tento marketplace.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <h3>Vygenerovat nový klíč</h3>
+                  <div className="formGrid">
+                    <label>Label<input value={apiKeyForm.label} onChange={(e) => setApiKeyForm((p) => ({ ...p, label: e.target.value }))} placeholder="Production key" /></label>
+                    <label>Scopes (čárkou)<input value={apiKeyForm.scopes} onChange={(e) => setApiKeyForm((p) => ({ ...p, scopes: e.target.value }))} /></label>
+                    <label>Expirace (dny, prázdné = bez)<input type="number" min={1} value={apiKeyForm.expiresInDays} onChange={(e) => setApiKeyForm((p) => ({ ...p, expiresInDays: e.target.value }))} /></label>
+                  </div>
+                  <div className="rowActions">
+                    <button className="btn btnPrimary" onClick={() => void createApiKey()} disabled={apiKeyBusy}>
+                      {apiKeyBusy ? 'Generuji…' : '🔑 Vygenerovat API klíč'}
+                    </button>
+                  </div>
+
+                  {generatedKey && (
+                    <div className="generatedKeyBox">
+                      <p><strong>⚠️ Nový klíč — zkopíruj ho teď, nebude znovu zobrazen!</strong></p>
+                      <code className="generatedKeyValue">{generatedKey}</code>
+                      <button className="btn btnSecondary btnSm" onClick={() => { void navigator.clipboard.writeText(generatedKey); notify('success', 'Zkopírováno!') }}>
+                        📋 Kopírovat
+                      </button>
+                      <button className="btn btnGhost btnSm" onClick={() => setGeneratedKey(null)}>Zavřít</button>
+                    </div>
+                  )}
+                </>
+              )}
             </section>
           )}
 
