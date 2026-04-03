@@ -377,7 +377,7 @@ function App() {
     const txRes = await supabase
       .from('dpt_transactions')
       .select(
-        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at, dpt_marketplaces!inner(code, name)',
+        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at, dpt_marketplaces(code, name)',
       )
       .order('created_at', { ascending: false })
       .limit(300)
