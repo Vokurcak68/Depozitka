@@ -100,6 +100,72 @@ const allowedTransitions: Record<EscrowStatus, EscrowStatus[]> = {
   payout_confirmed: [],
 }
 
+function getEmailTargetsForStatus(tx: Transaction, adminEmail: string): { templateKey: string; toEmail: string }[] {
+  const admin = adminEmail.trim().toLowerCase()
+
+  switch (tx.status) {
+    case 'created':
+    case 'partial_paid':
+      return [
+        { templateKey: 'tx_created_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'tx_created_seller', toEmail: tx.sellerEmail },
+        ...(admin ? [{ templateKey: 'tx_created_admin', toEmail: admin }] : []),
+      ]
+
+    case 'paid':
+      return [
+        { templateKey: 'payment_received_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'payment_received_seller', toEmail: tx.sellerEmail },
+      ]
+
+    case 'shipped':
+      return [{ templateKey: 'shipped_buyer', toEmail: tx.buyerEmail }]
+
+    case 'delivered':
+      return [
+        { templateKey: 'delivered_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'delivered_seller', toEmail: tx.sellerEmail },
+      ]
+
+    case 'completed':
+    case 'auto_completed':
+      return [
+        { templateKey: 'completed_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'completed_seller', toEmail: tx.sellerEmail },
+      ]
+
+    case 'disputed':
+      return [
+        { templateKey: 'dispute_opened_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'dispute_opened_seller', toEmail: tx.sellerEmail },
+        ...(admin ? [{ templateKey: 'dispute_opened_admin', toEmail: admin }] : []),
+      ]
+
+    case 'hold':
+      return [
+        { templateKey: 'hold_set_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'hold_set_seller', toEmail: tx.sellerEmail },
+      ]
+
+    case 'refunded':
+      return [
+        { templateKey: 'refunded_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'refunded_seller', toEmail: tx.sellerEmail },
+      ]
+
+    case 'payout_sent':
+    case 'payout_confirmed':
+      return [
+        { templateKey: 'payout_seller', toEmail: tx.sellerEmail },
+        ...(admin ? [{ templateKey: 'payout_admin', toEmail: admin }] : []),
+      ]
+
+    case 'cancelled':
+    default:
+      return []
+  }
+}
+
 function formatPrice(value: number): string {
   return `${new Intl.NumberFormat('cs-CZ').format(value)} Kč`
 }
@@ -141,6 +207,7 @@ function App() {
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
+  const [manualEmailBusy, setManualEmailBusy] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
 
@@ -364,6 +431,36 @@ function App() {
     }
 
     await executeStatusChange(tx, targetStatus, note)
+  }
+
+  async function sendManualEmailForTx(tx: Transaction): Promise<void> {
+    const targets = getEmailTargetsForStatus(tx, sessionEmail)
+
+    if (!targets.length) {
+      notify('error', 'Pro stav „' + statusLabel[tx.status] + '“ není dostupná email šablona.')
+      return
+    }
+
+    setManualEmailBusy((prev) => ({ ...prev, [tx.id]: true }))
+
+    for (const target of targets) {
+      const { error } = await supabase.rpc('dpt_queue_email', {
+        p_transaction_id: tx.id,
+        p_template_key: target.templateKey,
+        p_to_email: target.toEmail,
+        p_note: 'Manual resend from UI · status=' + tx.status,
+      })
+
+      if (error) {
+        setManualEmailBusy((prev) => ({ ...prev, [tx.id]: false }))
+        notify('error', 'Queue email selhalo: ' + error.message)
+        return
+      }
+    }
+
+    setManualEmailBusy((prev) => ({ ...prev, [tx.id]: false }))
+    notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×).')
+    await reloadAll()
   }
 
   const summary = useMemo(() => {
@@ -618,10 +715,12 @@ function App() {
                         tx={tx}
                         note={statusNote[tx.id] || ''}
                         change={statusChange[tx.id] || ''}
+                        emailBusy={Boolean(manualEmailBusy[tx.id])}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
+                        onSendManualEmail={() => void sendManualEmailForTx(tx)}
                       />
                     ))}
                   </div>
@@ -635,10 +734,12 @@ function App() {
                         tx={tx}
                         note={statusNote[tx.id] || ''}
                         change={statusChange[tx.id] || ''}
+                        emailBusy={Boolean(manualEmailBusy[tx.id])}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
+                        onSendManualEmail={() => void sendManualEmailForTx(tx)}
                       />
                     ))}
                   </div>
@@ -652,10 +753,12 @@ function App() {
                         tx={tx}
                         note={statusNote[tx.id] || ''}
                         change={statusChange[tx.id] || ''}
+                        emailBusy={Boolean(manualEmailBusy[tx.id])}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
+                        onSendManualEmail={() => void sendManualEmailForTx(tx)}
                       />
                     ))}
                   </div>
@@ -732,10 +835,12 @@ function App() {
           events={selectedTxEvents}
           change={statusChange[selectedTx.id] || ''}
           note={statusNote[selectedTx.id] || ''}
+          emailBusy={Boolean(manualEmailBusy[selectedTx.id])}
           onClose={() => setSelectedTx(null)}
           onChange={(value) => setStatusChange((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onNote={(value) => setStatusNote((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onApply={() => void requestStatusChange(selectedTx)}
+          onSendManualEmail={() => void sendManualEmailForTx(selectedTx)}
         />
       )}
 
@@ -838,18 +943,22 @@ function TxCard({
   tx,
   change,
   note,
+  emailBusy = false,
   onChange,
   onNote,
   onApply,
   onOpenDetail,
+  onSendManualEmail,
 }: {
   tx: Transaction
   change: EscrowStatus | ''
   note: string
+  emailBusy?: boolean
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
   onApply: () => void
   onOpenDetail: () => void
+  onSendManualEmail: () => void
 }) {
   const nextOptions = allowedTransitions[tx.status]
 
@@ -891,6 +1000,9 @@ function TxCard({
           <button className="btn btnSecondary" onClick={onOpenDetail}>
             Detail
           </button>
+          <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
+            {emailBusy ? 'Odesílám…' : 'Odeslat email'}
+          </button>
           <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
             Potvrdit změnu
           </button>
@@ -905,19 +1017,23 @@ function TxDrawer({
   events,
   change,
   note,
+  emailBusy = false,
   onClose,
   onChange,
   onNote,
   onApply,
+  onSendManualEmail,
 }: {
   tx: Transaction
   events: TxEvent[]
   change: EscrowStatus | ''
   note: string
+  emailBusy?: boolean
   onClose: () => void
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
   onApply: () => void
+  onSendManualEmail: () => void
 }) {
   const nextOptions = allowedTransitions[tx.status]
 
@@ -965,9 +1081,14 @@ function TxDrawer({
               ))}
             </select>
             <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
-            <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
-              Potvrdit změnu
-            </button>
+            <div className="txButtons">
+              <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
+                {emailBusy ? 'Odesílám…' : 'Odeslat email dle stavu'}
+              </button>
+              <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
+                Potvrdit změnu
+              </button>
+            </div>
           </div>
         </div>
 
