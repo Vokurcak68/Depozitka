@@ -19,6 +19,15 @@ type EscrowStatus =
 
 type Theme = 'light' | 'dark'
 type QuickFilter = 'all' | 'resolve' | 'processing' | 'closed'
+type UserRole = 'admin' | 'support' | 'buyer' | 'seller' | 'service' | 'unknown'
+
+interface SellerSelfServiceForm {
+  transactionCode: string
+  iban: string
+  accountName: string
+  bic: string
+  requestId: string
+}
 
 interface Transaction {
   id: string
@@ -84,10 +93,22 @@ interface SellerPayoutForm {
 
 const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '' }
 const emptySpForm: SellerPayoutForm = { transactionCode: '', iban: '', accountName: '', bic: '' }
+const emptySellerSelfServiceForm: SellerSelfServiceForm = { transactionCode: '', iban: '', accountName: '', bic: '', requestId: '' }
 
 function normalizeIban(v: string): string { return v.replace(/\s+/g, '').toUpperCase() }
 function maskIban(v: string): string { const s = normalizeIban(v); if (!s) return '-'; return s.length <= 8 ? s : `${s.slice(0,4)}****${s.slice(-4)}` }
 function payoutSourceLabel(v: string): string { return ({ marketplace_api: 'Marketplace API', seller_portal: 'Seller portal', admin_override: 'Admin override' } as Record<string,string>)[v] || v || '-' }
+function roleLabel(role: UserRole): string { return ({ admin: 'Admin', support: 'Support', buyer: 'Kupující', seller: 'Prodejce', service: 'Service', unknown: 'Neznámá role' } as Record<UserRole, string>)[role] }
+function canUseAdminTabs(role: UserRole): boolean { return role === 'admin' || role === 'support' }
+function canUseSellerSelfService(role: UserRole): boolean { return role === 'seller' || role === 'admin' || role === 'support' }
+function resolveUserRole(value: string | null | undefined): UserRole {
+  const v = (value || '').trim().toLowerCase()
+  if (v === 'admin' || v === 'support' || v === 'buyer' || v === 'seller' || v === 'service') return v
+  return 'unknown'
+}
+function isLikelyValidIban(v: string): boolean { return /^[A-Z]{2}[A-Z0-9]{13,32}$/.test(normalizeIban(v)) }
+function isLikelyValidBic(v: string): boolean { return !v.trim() || /^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(v.trim().toUpperCase()) }
+function generateClientRequestId(): string { return `seller-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }
 
 const quickFilterLabel: Record<QuickFilter, string> = {
   all: 'Vše',
@@ -215,6 +236,7 @@ function resolveInitialTheme(): Theme {
 function App() {
   const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
+  const [userRole, setUserRole] = useState<UserRole>('unknown')
   const [password, setPassword] = useState('')
   const [isAuthed, setIsAuthed] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -242,6 +264,8 @@ function App() {
   const [marketplaceBusy, setMarketplaceBusy] = useState(false)
   const [sellerFallbackForm, setSellerFallbackForm] = useState<SellerPayoutForm>(emptySpForm)
   const [sellerFallbackBusy, setSellerFallbackBusy] = useState(false)
+  const [sellerSelfServiceForm, setSellerSelfServiceForm] = useState<SellerSelfServiceForm>({ ...emptySellerSelfServiceForm, requestId: generateClientRequestId() })
+  const [sellerSelfServiceBusy, setSellerSelfServiceBusy] = useState(false)
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
@@ -265,17 +289,29 @@ function App() {
   }, [flash])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       const email = data.session?.user?.email || ''
       setSessionEmail(email)
       setIsAuthed(Boolean(data.session))
+      if (data.session) {
+        const { data: roleData } = await supabase.rpc('dpt_current_role')
+        setUserRole(resolveUserRole(roleData))
+      } else {
+        setUserRole('unknown')
+      }
     })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSessionEmail(session?.user?.email || '')
       setIsAuthed(Boolean(session))
+      if (session) {
+        const { data: roleData } = await supabase.rpc('dpt_current_role')
+        setUserRole(resolveUserRole(roleData))
+      } else {
+        setUserRole('unknown')
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -305,6 +341,8 @@ function App() {
       notify('error', `Login chyba: ${error.message}`)
       return
     }
+    const { data: roleData } = await supabase.rpc('dpt_current_role')
+    setUserRole(resolveUserRole(roleData))
     notify('success', 'Přihlášení proběhlo v pořádku.')
     await reloadAll()
   }
@@ -316,6 +354,7 @@ function App() {
     setEmailLogs([])
     setSelectedTx(null)
     setFlash(null)
+    setUserRole('unknown')
   }
 
   async function reloadAll(): Promise<void> {
@@ -468,6 +507,51 @@ function App() {
     setSellerFallbackBusy(false)
     if (error) { notify('error', `Seller fallback: ${error.message}`); return }
     notify('success', `Payout účet pro ${txCode} uložen.`)
+    await reloadAll()
+  }
+
+  async function saveSellerSelfService(): Promise<void> {
+    const txCode = sellerSelfServiceForm.transactionCode.trim()
+    const iban = normalizeIban(sellerSelfServiceForm.iban)
+    const bic = sellerSelfServiceForm.bic.trim().toUpperCase()
+
+    if (!canUseSellerSelfService(userRole)) {
+      notify('error', 'Self-service je jen pro seller/admin/support.')
+      return
+    }
+
+    if (!txCode) {
+      notify('error', 'Vyber transakci.')
+      return
+    }
+
+    if (!isLikelyValidIban(iban)) {
+      notify('error', 'IBAN není validní.')
+      return
+    }
+
+    if (!isLikelyValidBic(bic)) {
+      notify('error', 'BIC musí mít 8 nebo 11 znaků.')
+      return
+    }
+
+    setSellerSelfServiceBusy(true)
+    const { error } = await supabase.rpc('dpt_seller_portal_set_payout_account', {
+      p_transaction_code: txCode,
+      p_iban: iban,
+      p_account_name: sellerSelfServiceForm.accountName.trim() || null,
+      p_bic: bic || null,
+      p_client_request_id: sellerSelfServiceForm.requestId.trim() || generateClientRequestId(),
+    })
+    setSellerSelfServiceBusy(false)
+
+    if (error) {
+      notify('error', `Seller self-service: ${error.message}`)
+      return
+    }
+
+    notify('success', `Self-service payout účet pro ${txCode} uložen.`)
+    setSellerSelfServiceForm({ ...emptySellerSelfServiceForm, requestId: generateClientRequestId() })
     await reloadAll()
   }
 
@@ -641,6 +725,7 @@ function App() {
           <span className="brandBadge">🛡️ Depozitka · Trust Clean</span>
           <h1>Depozitka Core</h1>
           <p>Bezpečná escrow administrativa s důrazem na jasný stav, audit a rychlé rozhodování.</p>
+          {isAuthed && <p className="hint">Přihlášený: {sessionEmail || '-'} · Role: <strong>{roleLabel(userRole)}</strong></p>}
         </div>
         <div className="heroActions">
           <button className="btn btnGhost" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
@@ -702,6 +787,104 @@ function App() {
         </section>
       ) : (
         <>
+          <section className="panel apiContractPanel">
+            <h2>API-first kontrakt + validační guardy</h2>
+            <div className="gridTwo">
+              <div>
+                <h3>Marketplace create endpoint</h3>
+                <ul>
+                  <li>RPC: <code>dpt_create_transaction_safe</code></li>
+                  <li>Guardy: API key + scope, idempotency <code>p_request_id</code>, rate limit, validace payloadu</li>
+                  <li>Kontrakt verze: <code>transactions.create.v1</code></li>
+                </ul>
+                <pre className="contractCode">{`POST ${import.meta.env.VITE_SUPABASE_URL || '<SUPABASE_URL>'}/rest/v1/rpc/dpt_create_transaction_safe
+Headers:
+- apikey: <SERVICE_ROLE_OR_SERVER_KEY>
+- Authorization: Bearer <SERVICE_ROLE_OR_SERVER_KEY>
+- Content-Type: application/json
+
+Body:
+{
+  "p_marketplace_code": "depozitka-test-bazar",
+  "p_api_key": "dpt_live_xxx",
+  "p_request_id": "tb-create-ord-2026-0001",
+  "p_external_order_id": "TB-ORD-2026-0001",
+  "p_buyer_name": "Kupující",
+  "p_buyer_email": "buyer@example.cz",
+  "p_seller_name": "Prodejce",
+  "p_seller_email": "seller@example.cz",
+  "p_amount_czk": 1490
+}`}</pre>
+              </div>
+              <div>
+                <h3>Seller portal fallback endpoint</h3>
+                <ul>
+                  <li>RPC: <code>dpt_seller_portal_set_payout_account</code></li>
+                  <li>Guardy: role seller/admin/support, validace IBAN/BIC, rate limit</li>
+                  <li>Respektuje lock po <code>paid</code> (enforce v DB funkci)</li>
+                </ul>
+                <pre className="contractCode">{`POST ${import.meta.env.VITE_SUPABASE_URL || '<SUPABASE_URL>'}/rest/v1/rpc/dpt_seller_portal_set_payout_account
+Headers:
+- apikey: <SUPABASE_ANON_KEY>
+- Authorization: Bearer <USER_ACCESS_TOKEN>
+- Content-Type: application/json
+
+Body:
+{
+  "p_transaction_code": "DPT-2026-0001",
+  "p_iban": "CZ6508000000192000145399",
+  "p_account_name": "LokoTom",
+  "p_bic": "GIBACZPX",
+  "p_client_request_id": "seller-req-2026-04-03-001"
+}`}</pre>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel sellerPortalPanel">
+            <h2>Seller self-service (mimo admin)</h2>
+            <p className="muted">Minimální flow: seller si může sám doplnit payout účet bez admin zásahu.</p>
+            {!canUseSellerSelfService(userRole) && <p className="hint" style={{ color: '#ef4444' }}>Aktuální role ({roleLabel(userRole)}) nemá právo volat seller self-service endpoint.</p>}
+            <div className="formGrid">
+              <label>
+                Transakce
+                <select
+                  value={sellerSelfServiceForm.transactionCode}
+                  onChange={(e) => {
+                    const code = e.target.value
+                    const tx = transactions.find((t) => t.transactionCode === code)
+                    setSellerSelfServiceForm((prev) => ({
+                      ...prev,
+                      transactionCode: code,
+                      iban: tx?.sellerPayoutIban || prev.iban,
+                      accountName: tx?.sellerPayoutAccountName || prev.accountName,
+                      bic: tx?.sellerPayoutBic || prev.bic,
+                    }))
+                  }}
+                >
+                  <option value="">Vyber transakci</option>
+                  {transactions.map((tx) => (
+                    <option key={tx.id} value={tx.transactionCode}>
+                      {tx.transactionCode} · {tx.sellerName} · {statusLabel[tx.status]} {tx.sellerPayoutLockedAt ? '🔒' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>IBAN<input value={sellerSelfServiceForm.iban} onChange={(e) => setSellerSelfServiceForm((p) => ({ ...p, iban: e.target.value }))} placeholder="CZ6508000000192000145399" /></label>
+              <label>Název účtu<input value={sellerSelfServiceForm.accountName} onChange={(e) => setSellerSelfServiceForm((p) => ({ ...p, accountName: e.target.value }))} /></label>
+              <label>BIC<input value={sellerSelfServiceForm.bic} onChange={(e) => setSellerSelfServiceForm((p) => ({ ...p, bic: e.target.value.toUpperCase() }))} placeholder="GIBACZPX" /></label>
+              <label>Client request ID<input value={sellerSelfServiceForm.requestId} onChange={(e) => setSellerSelfServiceForm((p) => ({ ...p, requestId: e.target.value }))} /></label>
+            </div>
+            <div className="rowActions">
+              <button className="btn btnPrimary" onClick={() => void saveSellerSelfService()} disabled={sellerSelfServiceBusy || !sellerSelfServiceForm.transactionCode || !sellerSelfServiceForm.iban}>
+                {sellerSelfServiceBusy ? 'Ukládám…' : 'Uložit payout účet (self-service)'}
+              </button>
+              <button className="btn btnSecondary" onClick={() => setSellerSelfServiceForm((p) => ({ ...p, requestId: generateClientRequestId() }))}>
+                Vygenerovat request ID
+              </button>
+            </div>
+          </section>
+
           <div className="tabsRow">
             <nav className="tabs">
               <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}>
@@ -710,12 +893,16 @@ function App() {
               <button className={tab === 'emails' ? 'active' : ''} onClick={() => setTab('emails')}>
                 Email + audit
               </button>
-              <button className={tab === 'marketplaces' ? 'active' : ''} onClick={() => setTab('marketplaces')}>
-                Marketplaces
-              </button>
-              <button className={tab === 'seller-fallback' ? 'active' : ''} onClick={() => setTab('seller-fallback')}>
-                Seller payout
-              </button>
+              {canUseAdminTabs(userRole) && (
+                <>
+                  <button className={tab === 'marketplaces' ? 'active' : ''} onClick={() => setTab('marketplaces')}>
+                    Marketplaces
+                  </button>
+                  <button className={tab === 'seller-fallback' ? 'active' : ''} onClick={() => setTab('seller-fallback')}>
+                    Seller payout
+                  </button>
+                </>
+              )}
             </nav>
             <button type="button" className="btn btnPrimary tabsCreateBtn" onClick={() => setShowCreateForm((prev) => !prev)}>
               {showCreateForm ? 'Skrýt formulář' : 'Vytvořit novou transakci'}
@@ -957,7 +1144,7 @@ function App() {
             </section>
           )}
 
-          {tab === 'marketplaces' && (
+          {canUseAdminTabs(userRole) && tab === 'marketplaces' && (
             <section className="panel">
               <h2>Evidence marketplace</h2>
               <p className="muted">Správa napojených bazarů, settlement účtů a revshare.</p>
@@ -1000,7 +1187,7 @@ function App() {
             </section>
           )}
 
-          {tab === 'seller-fallback' && (
+          {canUseAdminTabs(userRole) && tab === 'seller-fallback' && (
             <section className="panel">
               <h2>Seller payout fallback</h2>
               <p className="muted">Použij, když marketplace neposlal payout účet při create transaction. Po stavu „paid" je účet zamčený.</p>
