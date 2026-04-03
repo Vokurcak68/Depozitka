@@ -23,6 +23,8 @@ type QuickFilter = 'all' | 'resolve' | 'processing' | 'closed'
 interface Transaction {
   id: string
   transactionCode: string
+  marketplaceCode: string
+  marketplaceName: string
   externalOrderId: string
   buyerName: string
   buyerEmail: string
@@ -286,7 +288,7 @@ function App() {
     const txRes = await supabase
       .from('dpt_transactions')
       .select(
-        'id, transaction_code, external_order_id, buyer_name, buyer_email, seller_name, seller_email, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at',
+        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at, dpt_marketplaces!inner(code, name)',
       )
       .order('created_at', { ascending: false })
       .limit(300)
@@ -300,9 +302,12 @@ function App() {
     const txMap = new Map<string, string>()
     const txRows: Transaction[] = (txRes.data || []).map((row) => {
       txMap.set(row.id, row.transaction_code)
+      const marketplace = Array.isArray(row.dpt_marketplaces) ? row.dpt_marketplaces[0] : row.dpt_marketplaces
       return {
         id: row.id,
         transactionCode: row.transaction_code,
+        marketplaceCode: marketplace?.code || '-',
+        marketplaceName: marketplace?.name || 'Neznámý bazar',
         externalOrderId: row.external_order_id,
         buyerName: row.buyer_name,
         buyerEmail: row.buyer_email,
@@ -970,6 +975,9 @@ function TxCard({
       </div>
 
       <p>
+        <strong>Bazar:</strong> {tx.marketplaceName} <span className="muted">({tx.marketplaceCode})</span>
+      </p>
+      <p>
         <strong>Order:</strong> {tx.externalOrderId}
       </p>
       <p>
@@ -1048,6 +1056,9 @@ function TxDrawer({
         </div>
 
         <div className="drawerSection">
+          <p>
+            <strong>Bazar:</strong> {tx.marketplaceName} <span className="muted">({tx.marketplaceCode})</span>
+          </p>
           <p>
             <strong>Order:</strong> {tx.externalOrderId}
           </p>
