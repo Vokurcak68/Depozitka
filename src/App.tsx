@@ -30,6 +30,11 @@ interface Transaction {
   buyerEmail: string
   sellerName: string
   sellerEmail: string
+  sellerPayoutIban: string
+  sellerPayoutAccountName: string
+  sellerPayoutBic: string
+  sellerPayoutSource: string
+  sellerPayoutLockedAt: string
   amountCzk: number
   feeAmountCzk: number
   payoutAmountCzk: number
@@ -62,6 +67,27 @@ interface PendingAction {
   targetStatus: EscrowStatus
   note: string
 }
+
+interface Marketplace {
+  id: string; code: string; name: string; active: boolean; feeSharePercent: number
+  settlementAccountName: string; settlementIban: string; settlementBic: string; notes: string
+}
+
+interface MarketplaceForm {
+  code: string; name: string; feeSharePercent: string
+  settlementAccountName: string; settlementIban: string; settlementBic: string; notes: string
+}
+
+interface SellerPayoutForm {
+  transactionCode: string; iban: string; accountName: string; bic: string
+}
+
+const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '' }
+const emptySpForm: SellerPayoutForm = { transactionCode: '', iban: '', accountName: '', bic: '' }
+
+function normalizeIban(v: string): string { return v.replace(/\s+/g, '').toUpperCase() }
+function maskIban(v: string): string { const s = normalizeIban(v); if (!s) return '-'; return s.length <= 8 ? s : `${s.slice(0,4)}****${s.slice(-4)}` }
+function payoutSourceLabel(v: string): string { return ({ marketplace_api: 'Marketplace API', seller_portal: 'Seller portal', admin_override: 'Admin override' } as Record<string,string>)[v] || v || '-' }
 
 const quickFilterLabel: Record<QuickFilter, string> = {
   all: 'Vše',
@@ -187,7 +213,7 @@ function resolveInitialTheme(): Theme {
 }
 
 function App() {
-  const [tab, setTab] = useState<'dashboard' | 'emails'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isAuthed, setIsAuthed] = useState(false)
@@ -205,7 +231,17 @@ function App() {
   const [sellerName, setSellerName] = useState('LokoTom')
   const [sellerEmail, setSellerEmail] = useState('seller@test.cz')
   const [amount, setAmount] = useState(1490)
+  const [sellerPayoutIban, setSellerPayoutIban] = useState('')
+  const [sellerPayoutAccountName, setSellerPayoutAccountName] = useState('')
+  const [sellerPayoutBic, setSellerPayoutBic] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
+
+  const [marketplaces, setMarketplaces] = useState<Marketplace[]>([])
+  const [marketplaceCode, setMarketplaceCode] = useState('')
+  const [marketplaceForm, setMarketplaceForm] = useState<MarketplaceForm>(emptyMpForm)
+  const [marketplaceBusy, setMarketplaceBusy] = useState(false)
+  const [sellerFallbackForm, setSellerFallbackForm] = useState<SellerPayoutForm>(emptySpForm)
+  const [sellerFallbackBusy, setSellerFallbackBusy] = useState(false)
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
@@ -288,7 +324,7 @@ function App() {
     const txRes = await supabase
       .from('dpt_transactions')
       .select(
-        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at, dpt_marketplaces!inner(code, name)',
+        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at, dpt_marketplaces!inner(code, name)',
       )
       .order('created_at', { ascending: false })
       .limit(300)
@@ -313,6 +349,11 @@ function App() {
         buyerEmail: row.buyer_email,
         sellerName: row.seller_name,
         sellerEmail: row.seller_email,
+        sellerPayoutIban: row.seller_payout_iban || '',
+        sellerPayoutAccountName: row.seller_payout_account_name || '',
+        sellerPayoutBic: row.seller_payout_bic || '',
+        sellerPayoutSource: row.seller_payout_source || '',
+        sellerPayoutLockedAt: row.seller_payout_locked_at || '',
         amountCzk: Number(row.amount_czk),
         feeAmountCzk: Number(row.fee_amount_czk),
         payoutAmountCzk: Number(row.payout_amount_czk),
@@ -362,7 +403,72 @@ function App() {
       )
     }
 
+    // load marketplaces
+    const mpRes = await supabase
+      .from('dpt_marketplaces')
+      .select('id, code, name, active, fee_share_percent, settlement_account_name, settlement_iban, settlement_bic, notes')
+      .order('name', { ascending: true })
+
+    if (!mpRes.error) {
+      setMarketplaces((mpRes.data || []).map((r: any) => ({
+        id: r.id, code: r.code, name: r.name, active: Boolean(r.active),
+        feeSharePercent: Number(r.fee_share_percent || 0),
+        settlementAccountName: r.settlement_account_name || '',
+        settlementIban: r.settlement_iban || '',
+        settlementBic: r.settlement_bic || '',
+        notes: r.notes || '',
+      })))
+    }
+
     setBusy(false)
+  }
+
+  function onMarketplacePick(code: string): void {
+    setMarketplaceCode(code)
+    const m = marketplaces.find((x) => x.code === code)
+    if (m) {
+      setMarketplaceForm({ code: m.code, name: m.name, feeSharePercent: String(m.feeSharePercent), settlementAccountName: m.settlementAccountName, settlementIban: m.settlementIban, settlementBic: m.settlementBic, notes: m.notes })
+    } else {
+      setMarketplaceForm({ ...emptyMpForm })
+    }
+  }
+
+  async function saveMarketplace(): Promise<void> {
+    const code = (marketplaceForm.code || marketplaceForm.name).trim().toLowerCase().replace(/[^a-z0-9-]/g, '-')
+    if (!code || !marketplaceForm.name.trim()) { notify('error', 'Code a Name jsou povinné.'); return }
+    setMarketplaceBusy(true)
+    const { error } = await supabase.from('dpt_marketplaces').upsert({
+      code, name: marketplaceForm.name.trim(), active: true,
+      fee_share_percent: parseFloat(marketplaceForm.feeSharePercent) || 0,
+      settlement_account_name: marketplaceForm.settlementAccountName.trim() || null,
+      settlement_iban: normalizeIban(marketplaceForm.settlementIban) || null,
+      settlement_bic: marketplaceForm.settlementBic.trim().toUpperCase() || null,
+      notes: marketplaceForm.notes.trim() || null,
+    }, { onConflict: 'code' })
+    setMarketplaceBusy(false)
+    if (error) { notify('error', `Save marketplace: ${error.message}`); return }
+    notify('success', `Marketplace "${code}" uložen.`)
+    setMarketplaceCode(code)
+    await reloadAll()
+  }
+
+  async function saveSellerFallback(): Promise<void> {
+    const txCode = sellerFallbackForm.transactionCode.trim()
+    const iban = normalizeIban(sellerFallbackForm.iban)
+    if (!txCode || !iban) { notify('error', 'Transaction code a IBAN jsou povinné.'); return }
+    setSellerFallbackBusy(true)
+    const { error } = await supabase.rpc('dpt_set_seller_payout_account', {
+      p_transaction_code: txCode,
+      p_iban: iban,
+      p_account_name: sellerFallbackForm.accountName.trim() || null,
+      p_bic: sellerFallbackForm.bic.trim().toUpperCase() || null,
+      p_source: 'admin_override',
+      p_note: 'Admin override from UI',
+    })
+    setSellerFallbackBusy(false)
+    if (error) { notify('error', `Seller fallback: ${error.message}`); return }
+    notify('success', `Payout účet pro ${txCode} uložen.`)
+    await reloadAll()
   }
 
   async function createTransaction(): Promise<void> {
@@ -383,7 +489,14 @@ function App() {
       p_seller_email: sellerEmail,
       p_amount_czk: amount,
       p_payment_method: 'escrow',
-      p_metadata: { source: 'depozitka-core-ui' },
+      p_metadata: (() => {
+        const md: Record<string, string> = { source: 'depozitka-core-ui' }
+        const iban = normalizeIban(sellerPayoutIban)
+        if (iban) md.seller_payout_iban = iban
+        if (sellerPayoutAccountName.trim()) md.seller_payout_account_name = sellerPayoutAccountName.trim()
+        if (sellerPayoutBic.trim()) md.seller_payout_bic = sellerPayoutBic.trim().toUpperCase()
+        return md
+      })(),
     })
     setBusy(false)
 
@@ -597,6 +710,12 @@ function App() {
               <button className={tab === 'emails' ? 'active' : ''} onClick={() => setTab('emails')}>
                 Email + audit
               </button>
+              <button className={tab === 'marketplaces' ? 'active' : ''} onClick={() => setTab('marketplaces')}>
+                Marketplaces
+              </button>
+              <button className={tab === 'seller-fallback' ? 'active' : ''} onClick={() => setTab('seller-fallback')}>
+                Seller payout
+              </button>
             </nav>
             <button type="button" className="btn btnPrimary tabsCreateBtn" onClick={() => setShowCreateForm((prev) => !prev)}>
               {showCreateForm ? 'Skrýt formulář' : 'Vytvořit novou transakci'}
@@ -667,6 +786,18 @@ function App() {
                       <label>
                         Amount (Kč)
                         <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
+                      </label>
+                      <label>
+                        Seller payout IBAN <span className="muted">(volitelné)</span>
+                        <input value={sellerPayoutIban} onChange={(e) => setSellerPayoutIban(e.target.value)} placeholder="CZ6508000000192000145399" />
+                      </label>
+                      <label>
+                        Seller payout jméno účtu <span className="muted">(volitelné)</span>
+                        <input value={sellerPayoutAccountName} onChange={(e) => setSellerPayoutAccountName(e.target.value)} />
+                      </label>
+                      <label>
+                        Seller payout BIC <span className="muted">(volitelné)</span>
+                        <input value={sellerPayoutBic} onChange={(e) => setSellerPayoutBic(e.target.value)} placeholder="GIBACZPX" />
                       </label>
                     </div>
                     <button className="btn btnPrimary" onClick={() => void createTransaction()} disabled={busy}>
@@ -822,6 +953,83 @@ function App() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </section>
+          )}
+
+          {tab === 'marketplaces' && (
+            <section className="panel">
+              <h2>Evidence marketplace</h2>
+              <p className="muted">Správa napojených bazarů, settlement účtů a revshare.</p>
+
+              <div className="gridTwo">
+                <div>
+                  <h3>Seznam</h3>
+                  <div className="marketplaceList">
+                    {marketplaces.map((m) => (
+                      <button key={m.id} className={marketplaceCode === m.code ? 'active' : ''} onClick={() => onMarketplacePick(m.code)}>
+                        <strong>{m.name}</strong>
+                        <span className="muted">{m.code} · {m.feeSharePercent}%</span>
+                      </button>
+                    ))}
+                    {marketplaces.length === 0 && <p className="hint">Žádné marketplace.</p>}
+                  </div>
+                </div>
+
+                <div>
+                  <h3>{marketplaceCode ? 'Editovat' : 'Nový marketplace'}</h3>
+                  <div className="formGrid">
+                    <label>Code<input value={marketplaceForm.code} onChange={(e) => setMarketplaceForm((p) => ({ ...p, code: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} /></label>
+                    <label>Name<input value={marketplaceForm.name} onChange={(e) => setMarketplaceForm((p) => ({ ...p, name: e.target.value }))} /></label>
+                    <label>Fee share %<input type="number" min={0} max={100} step={0.1} value={marketplaceForm.feeSharePercent} onChange={(e) => setMarketplaceForm((p) => ({ ...p, feeSharePercent: e.target.value }))} /></label>
+                    <label>Settlement account name<input value={marketplaceForm.settlementAccountName} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementAccountName: e.target.value }))} /></label>
+                    <label>Settlement IBAN<input value={marketplaceForm.settlementIban} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementIban: e.target.value }))} /></label>
+                    <label>Settlement BIC<input value={marketplaceForm.settlementBic} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementBic: e.target.value }))} /></label>
+                  </div>
+                  <label>Notes<textarea value={marketplaceForm.notes} onChange={(e) => setMarketplaceForm((p) => ({ ...p, notes: e.target.value }))} rows={3} /></label>
+                  <div className="rowActions">
+                    <button className="btn btnPrimary" onClick={() => void saveMarketplace()} disabled={marketplaceBusy}>
+                      {marketplaceBusy ? 'Ukládám…' : 'Uložit marketplace'}
+                    </button>
+                    <button className="btn btnSecondary" onClick={() => { setMarketplaceCode(''); setMarketplaceForm({ ...emptyMpForm }) }}>
+                      Nový záznam
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {tab === 'seller-fallback' && (
+            <section className="panel">
+              <h2>Seller payout fallback</h2>
+              <p className="muted">Použij, když marketplace neposlal payout účet při create transaction. Po stavu „paid" je účet zamčený.</p>
+
+              <div className="formGrid">
+                <label>
+                  Transakce
+                  <select value={sellerFallbackForm.transactionCode} onChange={(e) => {
+                    const code = e.target.value
+                    const tx = transactions.find((t) => t.transactionCode === code)
+                    setSellerFallbackForm(tx ? { transactionCode: tx.transactionCode, iban: tx.sellerPayoutIban, accountName: tx.sellerPayoutAccountName, bic: tx.sellerPayoutBic } : { ...emptySpForm, transactionCode: code })
+                  }}>
+                    <option value="">Vyber transakci</option>
+                    {transactions.map((tx) => (
+                      <option key={tx.id} value={tx.transactionCode}>
+                        {tx.transactionCode} · {tx.sellerName} · {statusLabel[tx.status]} {tx.sellerPayoutLockedAt ? '🔒' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>IBAN<input value={sellerFallbackForm.iban} onChange={(e) => setSellerFallbackForm((p) => ({ ...p, iban: e.target.value }))} /></label>
+                <label>Account name<input value={sellerFallbackForm.accountName} onChange={(e) => setSellerFallbackForm((p) => ({ ...p, accountName: e.target.value }))} /></label>
+                <label>BIC<input value={sellerFallbackForm.bic} onChange={(e) => setSellerFallbackForm((p) => ({ ...p, bic: e.target.value }))} /></label>
+              </div>
+
+              <div className="rowActions">
+                <button className="btn btnPrimary" onClick={() => void saveSellerFallback()} disabled={sellerFallbackBusy || !sellerFallbackForm.transactionCode || !sellerFallbackForm.iban}>
+                  {sellerFallbackBusy ? 'Ukládám…' : 'Uložit payout účet'}
+                </button>
               </div>
             </section>
           )}
@@ -981,6 +1189,10 @@ function TxCard({
         <strong>Prodávající:</strong> {tx.sellerName} ({tx.sellerEmail})
       </p>
       <p>
+        <strong>Payout:</strong> {maskIban(tx.sellerPayoutIban)} · {payoutSourceLabel(tx.sellerPayoutSource)}
+        {tx.sellerPayoutLockedAt ? ' 🔒' : ''}
+      </p>
+      <p>
         <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
         <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
       </p>
@@ -1065,6 +1277,11 @@ function TxDrawer({
           <p>
             <strong>Prodávající:</strong> {tx.sellerName} ({tx.sellerEmail})
           </p>
+          <p><strong>Payout IBAN:</strong> {maskIban(tx.sellerPayoutIban)}</p>
+          <p><strong>Payout jméno:</strong> {tx.sellerPayoutAccountName || '-'}</p>
+          <p><strong>Payout BIC:</strong> {tx.sellerPayoutBic || '-'}</p>
+          <p><strong>Payout source:</strong> {payoutSourceLabel(tx.sellerPayoutSource)}</p>
+          <p><strong>Payout lock:</strong> {tx.sellerPayoutLockedAt ? `🔒 ${formatDate(tx.sellerPayoutLockedAt)}` : 'Odemčeno'}</p>
           <p>
             <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
             <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
