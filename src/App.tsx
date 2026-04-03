@@ -589,14 +589,19 @@ function App() {
         </section>
       ) : (
         <>
-          <nav className="tabs">
-            <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}>
-              Dashboard
+          <div className="tabsRow">
+            <nav className="tabs">
+              <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}>
+                Dashboard
+              </button>
+              <button className={tab === 'emails' ? 'active' : ''} onClick={() => setTab('emails')}>
+                Email + audit
+              </button>
+            </nav>
+            <button type="button" className="btn btnPrimary tabsCreateBtn" onClick={() => setShowCreateForm((prev) => !prev)}>
+              {showCreateForm ? 'Skrýt formulář' : 'Vytvořit novou transakci'}
             </button>
-            <button className={tab === 'emails' ? 'active' : ''} onClick={() => setTab('emails')}>
-              Email + audit
-            </button>
-          </nav>
+          </div>
 
           {tab === 'dashboard' && (
             <>
@@ -635,19 +640,8 @@ function App() {
                 <StatCard label="Objem transakcí" value={formatPrice(summary.totalVolume)} tone="neutral" />
               </section>
 
-              <section className="panel createPanel">
-                <div className="createPanelHead">
-                  <h2>Nová transakce</h2>
-                  <button
-                    type="button"
-                    className="btn btnSecondary"
-                    onClick={() => setShowCreateForm((prev) => !prev)}
-                  >
-                    {showCreateForm ? 'Skrýt formulář' : 'Vytvořit novou transakci'}
-                  </button>
-                </div>
-
-                {showCreateForm && (
+              {showCreateForm && (
+                <section className="panel createPanel">
                   <div className="createPanelBody">
                     <div className="formGrid">
                       <label>
@@ -679,8 +673,8 @@ function App() {
                       {busy ? 'Vytvářím…' : 'Vytvořit transakci'}
                     </button>
                   </div>
-                )}
-              </section>
+                </section>
+              )}
 
               <section className="panel">
                 <h2>Escrow pipeline</h2>

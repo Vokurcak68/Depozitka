@@ -187,10 +187,23 @@
   color: var(--muted);
 }
 
+.tabsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 14px;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
-  margin: 12px 0 14px;
+  margin: 0;
+}
+
+.tabsCreateBtn {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .tabs button {
@@ -800,6 +813,15 @@ code {
   .statsGrid,
   .trustStrip {
     grid-template-columns: 1fr;
+  }
+
+  .tabsRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tabsCreateBtn {
+    margin-left: 0;
   }
 
   .txButtons {
