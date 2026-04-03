@@ -61,6 +61,13 @@ interface PendingAction {
   note: string
 }
 
+const quickFilterLabel: Record<QuickFilter, string> = {
+  all: 'Vše',
+  resolve: 'K řešení',
+  processing: 'V procesu',
+  closed: 'Ukončeno',
+}
+
 const statusLabel: Record<EscrowStatus, string> = {
   created: 'Vytvořeno',
   partial_paid: 'Částečně zaplaceno',
@@ -581,10 +588,14 @@ function App() {
                     ))}
                   </select>
                 </div>
+                <p className="hint filtersHint">
+                  Zobrazeno {filteredTransactions.length} / {transactions.length} · Aktivní rychlý filtr: {quickFilterLabel[quickFilter]}
+                </p>
 
                 <div className="groupWrap">
                   <div className="group">
                     <h3>K řešení ({grouped.resolve.length})</h3>
+                    {grouped.resolve.length === 0 && <EmptyGroup text="Momentálně nic k řešení." />}
                     {grouped.resolve.map((tx) => (
                       <TxCard
                         key={tx.id}
@@ -601,6 +612,7 @@ function App() {
 
                   <div className="group">
                     <h3>V procesu ({grouped.processing.length})</h3>
+                    {grouped.processing.length === 0 && <EmptyGroup text="Žádná rozpracovaná transakce." />}
                     {grouped.processing.map((tx) => (
                       <TxCard
                         key={tx.id}
@@ -617,6 +629,7 @@ function App() {
 
                   <div className="group">
                     <h3>Ukončeno ({grouped.closed.length})</h3>
+                    {grouped.closed.length === 0 && <EmptyGroup text="Zatím bez ukončených transakcí." />}
                     {grouped.closed.map((tx) => (
                       <TxCard
                         key={tx.id}
@@ -773,6 +786,10 @@ function LandingSection({ onLoginClick }: { onLoginClick: () => void }) {
       </div>
     </section>
   )
+}
+
+function EmptyGroup({ text }: { text: string }) {
+  return <p className="emptyGroup">{text}</p>
 }
 
 function StatCard({

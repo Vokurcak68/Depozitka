@@ -199,7 +199,7 @@
 .panel {
   border: 1px solid var(--panel-border);
   border-radius: 16px;
-  padding: 16px;
+  padding: 18px;
   background: var(--panel-bg);
   margin-bottom: 14px;
   box-shadow: var(--shadow);
@@ -329,8 +329,14 @@ select:focus {
   background: color-mix(in srgb, var(--panel-bg) 92%, #e2e8f0 8%);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
-  padding: 10px;
+  padding: 12px;
   min-height: 220px;
+}
+
+.group h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .group h3 {
@@ -341,7 +347,7 @@ select:focus {
   border: 1px solid #dbeafe;
   background: var(--panel-bg);
   border-radius: 12px;
-  padding: 10px;
+  padding: 12px;
   margin-bottom: 10px;
 }
 
@@ -350,7 +356,7 @@ select:focus {
 }
 
 .txCard p {
-  margin: 4px 0;
+  margin: 5px 0;
   font-size: 13px;
 }
 
@@ -365,7 +371,7 @@ select:focus {
 .txActions {
   display: grid;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .txButtons {
@@ -493,6 +499,11 @@ td {
   margin: 0 0 10px;
 }
 
+.filtersHint {
+  margin-top: -2px;
+  margin-bottom: 12px;
+}
+
 .flash {
   border-radius: 12px;
   padding: 10px 12px;
@@ -596,7 +607,7 @@ td {
 .timeline li {
   border: 1px solid var(--panel-border);
   border-radius: 10px;
-  padding: 8px;
+  padding: 10px;
   display: grid;
   gap: 4px;
 }
@@ -620,6 +631,15 @@ code {
   .landingFeatures {
     grid-template-columns: 1fr;
   }
+}
+
+.emptyGroup {
+  border: 1px dashed var(--panel-border);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 10px;
 }
 
 @media (max-width: 1024px) {
