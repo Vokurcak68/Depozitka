@@ -84,16 +84,16 @@ const allowedTransitions: Record<EscrowStatus, EscrowStatus[]> = {
   payout_confirmed: [],
 }
 
-function formatPrice(value: number) {
+function formatPrice(value: number): string {
   return `${new Intl.NumberFormat('cs-CZ').format(value)} Kč`
 }
 
-function formatDate(value: string) {
+function formatDate(value: string): string {
   return new Date(value).toLocaleString('cs-CZ')
 }
 
 function App() {
-  const [tab, setTab] = useState<'api' | 'admin' | 'emails'>('api')
+  const [tab, setTab] = useState<'dashboard' | 'emails'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isAuthed, setIsAuthed] = useState(false)
@@ -112,6 +112,9 @@ function App() {
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
+
+  const [searchText, setSearchText] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | EscrowStatus>('all')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -135,7 +138,7 @@ function App() {
     void reloadAll()
   }, [isAuthed])
 
-  async function signIn() {
+  async function signIn(): Promise<void> {
     if (!sessionEmail || !password) {
       alert('Vyplň email a heslo')
       return
@@ -153,14 +156,14 @@ function App() {
     await reloadAll()
   }
 
-  async function signOut() {
+  async function signOut(): Promise<void> {
     await supabase.auth.signOut()
     setTransactions([])
     setEvents([])
     setEmailLogs([])
   }
 
-  async function reloadAll() {
+  async function reloadAll(): Promise<void> {
     setBusy(true)
 
     const txRes = await supabase
@@ -169,7 +172,7 @@ function App() {
         'id, transaction_code, external_order_id, buyer_name, buyer_email, seller_name, seller_email, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at',
       )
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(300)
 
     if (txRes.error) {
       setBusy(false)
@@ -201,7 +204,7 @@ function App() {
       .from('dpt_transaction_events')
       .select('id, transaction_id, event_type, old_status, new_status, note, created_at')
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(250)
 
     if (!evRes.error) {
       setEvents(
@@ -221,7 +224,7 @@ function App() {
       .from('dpt_email_logs')
       .select('id, transaction_id, template_key, to_email, subject, status, created_at')
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(250)
 
     if (!mailRes.error) {
       setEmailLogs(
@@ -240,7 +243,7 @@ function App() {
     setBusy(false)
   }
 
-  async function createTransaction() {
+  async function createTransaction(): Promise<void> {
     if (!buyerName.trim() || !buyerEmail.trim() || !sellerName.trim() || !sellerEmail.trim()) {
       alert('Buyer/seller jméno + email jsou povinné')
       return
@@ -270,7 +273,7 @@ function App() {
     await reloadAll()
   }
 
-  async function changeStatus(tx: Transaction) {
+  async function changeStatus(tx: Transaction): Promise<void> {
     const targetStatus = statusChange[tx.id]
     if (!targetStatus) return
 
@@ -301,30 +304,69 @@ function App() {
     await reloadAll()
   }
 
-  const groups = useMemo(
+  const summary = useMemo(() => {
+    const resolve = transactions.filter((t) => ['disputed', 'hold'].includes(t.status)).length
+    const processing = transactions.filter((t) => ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(t.status)).length
+    const closed = transactions.filter((t) => ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(t.status)).length
+    const totalVolume = transactions.reduce((acc, tx) => acc + tx.amountCzk, 0)
+
+    return {
+      total: transactions.length,
+      resolve,
+      processing,
+      closed,
+      totalVolume,
+    }
+  }, [transactions])
+
+  const filteredTransactions = useMemo(() => {
+    const q = searchText.trim().toLowerCase()
+
+    return transactions.filter((tx) => {
+      const statusOk = statusFilter === 'all' || tx.status === statusFilter
+      if (!statusOk) return false
+
+      if (!q) return true
+
+      const haystack = `${tx.transactionCode} ${tx.externalOrderId} ${tx.buyerName} ${tx.buyerEmail} ${tx.sellerName} ${tx.sellerEmail}`.toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [transactions, searchText, statusFilter])
+
+  const grouped = useMemo(
     () => ({
-      resolve: transactions.filter((t) => ['disputed', 'hold'].includes(t.status)),
-      processing: transactions.filter((t) =>
-        ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(t.status),
-      ),
-      closed: transactions.filter((t) =>
+      resolve: filteredTransactions.filter((t) => ['disputed', 'hold'].includes(t.status)),
+      processing: filteredTransactions.filter((t) => ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(t.status)),
+      closed: filteredTransactions.filter((t) =>
         ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(t.status),
       ),
     }),
-    [transactions],
+    [filteredTransactions],
   )
 
   return (
     <div className="app">
-      <header className="topbar">
-        <h1>Depozitka Core (Supabase live)</h1>
-        <p>Napojené na Supabase tabulky `dpt_*` přes RPC + RLS.</p>
+      <header className="hero">
+        <div>
+          <h1>Depozitka Core</h1>
+          <p>Uživatelsky přívětivý admin panel pro escrow transakce, spory, výplaty a audit.</p>
+        </div>
+        {isAuthed && (
+          <div className="heroActions">
+            <button className="ghost" onClick={() => void reloadAll()} disabled={busy}>
+              Obnovit data
+            </button>
+            <button className="ghost" onClick={() => void signOut()} disabled={busy}>
+              Odhlásit
+            </button>
+          </div>
+        )}
       </header>
 
       {!isAuthed ? (
-        <section className="panel">
-          <h2>Přihlášení</h2>
-          <p className="hint">Přihlas se účtem, který má admin/support roli v `dpt_profiles`.</p>
+        <section className="panel authPanel">
+          <h2>Přihlášení do adminu</h2>
+          <p className="hint">Přihlas se účtem, který má roli admin/support v `dpt_profiles`.</p>
           <div className="formGrid">
             <label>
               Email
@@ -335,125 +377,131 @@ function App() {
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </label>
           </div>
-          <button className="primary" disabled={busy} onClick={signIn}>
+          <button className="primary" disabled={busy} onClick={() => void signIn()}>
             {busy ? 'Přihlašuji…' : 'Přihlásit'}
           </button>
         </section>
       ) : (
         <>
-          <section className="panel">
-            <div className="adminTopActions">
-              <strong>Přihlášen: {sessionEmail}</strong>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="ghost" onClick={() => void reloadAll()} disabled={busy}>
-                  Obnovit data
-                </button>
-                <button className="ghost" onClick={() => void signOut()} disabled={busy}>
-                  Odhlásit
-                </button>
-              </div>
-            </div>
-          </section>
-
           <nav className="tabs">
-            <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>
-              API simulace
-            </button>
-            <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>
-              Admin escrow
+            <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}>
+              Dashboard
             </button>
             <button className={tab === 'emails' ? 'active' : ''} onClick={() => setTab('emails')}>
               Email + audit
             </button>
           </nav>
 
-          {tab === 'api' && (
-            <section className="panel">
-              <h2>Create transaction</h2>
-              <div className="formGrid">
-                <label>
-                  External order ID
-                  <input value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)} />
-                </label>
-                <label>
-                  Buyer name
-                  <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
-                </label>
-                <label>
-                  Buyer email
-                  <input type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
-                </label>
-                <label>
-                  Seller name
-                  <input value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
-                </label>
-                <label>
-                  Seller email
-                  <input type="email" value={sellerEmail} onChange={(e) => setSellerEmail(e.target.value)} />
-                </label>
-                <label>
-                  Amount (Kč)
-                  <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
-                </label>
-              </div>
+          {tab === 'dashboard' && (
+            <>
+              <section className="statsGrid">
+                <StatCard label="Všechny transakce" value={summary.total.toString()} tone="neutral" />
+                <StatCard label="K řešení" value={summary.resolve.toString()} tone="danger" />
+                <StatCard label="V procesu" value={summary.processing.toString()} tone="info" />
+                <StatCard label="Ukončeno" value={summary.closed.toString()} tone="success" />
+                <StatCard label="Objem transakcí" value={formatPrice(summary.totalVolume)} tone="neutral" />
+              </section>
 
-              <button className="primary" onClick={() => void createTransaction()} disabled={busy}>
-                {busy ? 'Vytvářím…' : 'POST dpt_create_transaction()'}
-              </button>
-            </section>
-          )}
+              <section className="panel">
+                <h2>Vytvořit novou transakci</h2>
+                <div className="formGrid">
+                  <label>
+                    External order ID
+                    <input value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)} />
+                  </label>
+                  <label>
+                    Buyer name
+                    <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
+                  </label>
+                  <label>
+                    Buyer email
+                    <input type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
+                  </label>
+                  <label>
+                    Seller name
+                    <input value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
+                  </label>
+                  <label>
+                    Seller email
+                    <input type="email" value={sellerEmail} onChange={(e) => setSellerEmail(e.target.value)} />
+                  </label>
+                  <label>
+                    Amount (Kč)
+                    <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
+                  </label>
+                </div>
+                <button className="primary" onClick={() => void createTransaction()} disabled={busy}>
+                  {busy ? 'Vytvářím…' : 'Vytvořit transakci'}
+                </button>
+              </section>
 
-          {tab === 'admin' && (
-            <section className="panel">
-              <h2>Admin transakce ({transactions.length})</h2>
-
-              <div className="groupWrap">
-                <div className="group">
-                  <h3>K řešení ({groups.resolve.length})</h3>
-                  {groups.resolve.map((tx) => (
-                    <TxCard
-                      key={tx.id}
-                      tx={tx}
-                      note={statusNote[tx.id] || ''}
-                      change={statusChange[tx.id] || ''}
-                      onNote={(v) => setStatusNote((p) => ({ ...p, [tx.id]: v }))}
-                      onChange={(v) => setStatusChange((p) => ({ ...p, [tx.id]: v }))}
-                      onApply={() => void changeStatus(tx)}
-                    />
-                  ))}
+              <section className="panel">
+                <h2>Escrow pipeline</h2>
+                <div className="filtersRow">
+                  <input
+                    className="searchInput"
+                    placeholder="Hledat podle tx, order ID, kupujícího nebo prodejce…"
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
+                  />
+                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | EscrowStatus)}>
+                    <option value="all">Všechny stavy</option>
+                    {Object.keys(statusLabel).map((status) => (
+                      <option key={status} value={status}>
+                        {statusLabel[status as EscrowStatus]}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                <div className="group">
-                  <h3>V procesu ({groups.processing.length})</h3>
-                  {groups.processing.map((tx) => (
-                    <TxCard
-                      key={tx.id}
-                      tx={tx}
-                      note={statusNote[tx.id] || ''}
-                      change={statusChange[tx.id] || ''}
-                      onNote={(v) => setStatusNote((p) => ({ ...p, [tx.id]: v }))}
-                      onChange={(v) => setStatusChange((p) => ({ ...p, [tx.id]: v }))}
-                      onApply={() => void changeStatus(tx)}
-                    />
-                  ))}
-                </div>
+                <div className="groupWrap">
+                  <div className="group">
+                    <h3>K řešení ({grouped.resolve.length})</h3>
+                    {grouped.resolve.map((tx) => (
+                      <TxCard
+                        key={tx.id}
+                        tx={tx}
+                        note={statusNote[tx.id] || ''}
+                        change={statusChange[tx.id] || ''}
+                        onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+                        onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
+                        onApply={() => void changeStatus(tx)}
+                      />
+                    ))}
+                  </div>
 
-                <div className="group">
-                  <h3>Ukončeno ({groups.closed.length})</h3>
-                  {groups.closed.map((tx) => (
-                    <TxCard
-                      key={tx.id}
-                      tx={tx}
-                      note={statusNote[tx.id] || ''}
-                      change={statusChange[tx.id] || ''}
-                      onNote={(v) => setStatusNote((p) => ({ ...p, [tx.id]: v }))}
-                      onChange={(v) => setStatusChange((p) => ({ ...p, [tx.id]: v }))}
-                      onApply={() => void changeStatus(tx)}
-                    />
-                  ))}
+                  <div className="group">
+                    <h3>V procesu ({grouped.processing.length})</h3>
+                    {grouped.processing.map((tx) => (
+                      <TxCard
+                        key={tx.id}
+                        tx={tx}
+                        note={statusNote[tx.id] || ''}
+                        change={statusChange[tx.id] || ''}
+                        onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+                        onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
+                        onApply={() => void changeStatus(tx)}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="group">
+                    <h3>Ukončeno ({grouped.closed.length})</h3>
+                    {grouped.closed.map((tx) => (
+                      <TxCard
+                        key={tx.id}
+                        tx={tx}
+                        note={statusNote[tx.id] || ''}
+                        change={statusChange[tx.id] || ''}
+                        onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+                        onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
+                        onApply={() => void changeStatus(tx)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </section>
+              </section>
+            </>
           )}
 
           {tab === 'emails' && (
@@ -521,6 +569,23 @@ function App() {
   )
 }
 
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: 'neutral' | 'danger' | 'info' | 'success'
+}) {
+  return (
+    <article className={`statCard ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  )
+}
+
 function TxCard({
   tx,
   change,
@@ -571,11 +636,7 @@ function TxCard({
             </option>
           ))}
         </select>
-        <input
-          value={note}
-          onChange={(e) => onNote(e.target.value)}
-          placeholder="Důvod/poznámka (povinné pro hold/spor)"
-        />
+        <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
         <button className="primary" disabled={!change} onClick={onApply}>
           Potvrdit změnu
         </button>
