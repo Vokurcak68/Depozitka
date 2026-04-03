@@ -229,6 +229,18 @@
   padding: 12px;
   display: grid;
   gap: 6px;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+
+.statCard.active {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.statCard.nonInteractive {
+  cursor: default;
 }
 
 .statCard span {

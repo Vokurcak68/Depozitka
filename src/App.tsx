@@ -18,6 +18,7 @@ type EscrowStatus =
   | 'payout_confirmed'
 
 type Theme = 'light' | 'dark'
+type QuickFilter = 'all' | 'resolve' | 'processing' | 'closed'
 
 interface Transaction {
   id: string
@@ -137,6 +138,7 @@ function App() {
 
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | EscrowStatus>('all')
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
 
   useEffect(() => {
     localStorage.setItem('depozitka-theme', theme)
@@ -377,12 +379,20 @@ function App() {
       const statusOk = statusFilter === 'all' || tx.status === statusFilter
       if (!statusOk) return false
 
+      const quickOk =
+        quickFilter === 'all' ||
+        (quickFilter === 'resolve' && ['disputed', 'hold'].includes(tx.status)) ||
+        (quickFilter === 'processing' && ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(tx.status)) ||
+        (quickFilter === 'closed' && ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(tx.status))
+
+      if (!quickOk) return false
+
       if (!q) return true
 
       const haystack = `${tx.transactionCode} ${tx.externalOrderId} ${tx.buyerName} ${tx.buyerEmail} ${tx.sellerName} ${tx.sellerEmail}`.toLowerCase()
       return haystack.includes(q)
     })
-  }, [transactions, searchText, statusFilter])
+  }, [transactions, searchText, statusFilter, quickFilter])
 
   const grouped = useMemo(
     () => ({
@@ -480,10 +490,37 @@ function App() {
           {tab === 'dashboard' && (
             <>
               <section className="statsGrid">
-                <StatCard label="Všechny transakce" value={summary.total.toString()} tone="neutral" />
-                <StatCard label="K řešení" value={summary.resolve.toString()} tone="danger" />
-                <StatCard label="V procesu" value={summary.processing.toString()} tone="info" />
-                <StatCard label="Ukončeno" value={summary.closed.toString()} tone="success" />
+                <StatCard
+                  label="Všechny transakce"
+                  value={summary.total.toString()}
+                  tone="neutral"
+                  active={quickFilter === 'all'}
+                  onClick={() => {
+                    setQuickFilter('all')
+                    setStatusFilter('all')
+                  }}
+                />
+                <StatCard
+                  label="K řešení"
+                  value={summary.resolve.toString()}
+                  tone="danger"
+                  active={quickFilter === 'resolve'}
+                  onClick={() => setQuickFilter('resolve')}
+                />
+                <StatCard
+                  label="V procesu"
+                  value={summary.processing.toString()}
+                  tone="info"
+                  active={quickFilter === 'processing'}
+                  onClick={() => setQuickFilter('processing')}
+                />
+                <StatCard
+                  label="Ukončeno"
+                  value={summary.closed.toString()}
+                  tone="success"
+                  active={quickFilter === 'closed'}
+                  onClick={() => setQuickFilter('closed')}
+                />
                 <StatCard label="Objem transakcí" value={formatPrice(summary.totalVolume)} tone="neutral" />
               </section>
 
@@ -529,7 +566,13 @@ function App() {
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
                   />
-                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | EscrowStatus)}>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value as 'all' | EscrowStatus)
+                      setQuickFilter('all')
+                    }}
+                  >
                     <option value="all">Všechny stavy</option>
                     {Object.keys(statusLabel).map((status) => (
                       <option key={status} value={status}>
@@ -736,16 +779,25 @@ function StatCard({
   label,
   value,
   tone,
+  active = false,
+  onClick,
 }: {
   label: string
   value: string
   tone: 'neutral' | 'danger' | 'info' | 'success'
+  active?: boolean
+  onClick?: () => void
 }) {
   return (
-    <article className={`statCard ${tone}`}>
+    <button
+      type="button"
+      className={`statCard ${tone} ${active ? 'active' : ''} ${onClick ? '' : 'nonInteractive'}`}
+      onClick={onClick}
+      disabled={!onClick}
+    >
       <span>{label}</span>
       <strong>{value}</strong>
-    </article>
+    </button>
   )
 }
 
