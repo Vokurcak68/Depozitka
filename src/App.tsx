@@ -306,7 +306,8 @@ function App() {
       setSessionEmail(email)
       setIsAuthed(Boolean(data.session))
       if (data.session) {
-        const { data: roleData } = await supabase.rpc('dpt_current_role')
+        const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
+        console.log('[Arc] dpt_current_role response:', { roleData, roleError, uid: data.session.user.id })
         setUserRole(resolveUserRole(roleData))
       } else {
         setUserRole('unknown')
@@ -319,7 +320,8 @@ function App() {
       setSessionEmail(session?.user?.email || '')
       setIsAuthed(Boolean(session))
       if (session) {
-        const { data: roleData } = await supabase.rpc('dpt_current_role')
+        const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
+        console.log('[Arc] dpt_current_role onAuthChange:', { roleData, roleError, uid: session.user.id })
         setUserRole(resolveUserRole(roleData))
       } else {
         setUserRole('unknown')
