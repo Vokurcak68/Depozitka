@@ -52,6 +52,12 @@ interface EmailLog {
   createdAt: string
 }
 
+interface PendingAction {
+  tx: Transaction
+  targetStatus: EscrowStatus
+  note: string
+}
+
 const statusLabel: Record<EscrowStatus, string> = {
   created: 'Vytvořeno',
   partial_paid: 'Částečně zaplaceno',
@@ -92,12 +98,17 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleString('cs-CZ')
 }
 
+function isCriticalTransition(target: EscrowStatus): boolean {
+  return ['refunded', 'cancelled', 'payout_sent'].includes(target)
+}
+
 function App() {
   const [tab, setTab] = useState<'dashboard' | 'emails'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isAuthed, setIsAuthed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [flash, setFlash] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [events, setEvents] = useState<TxEvent[]>([])
@@ -112,9 +123,16 @@ function App() {
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
 
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | EscrowStatus>('all')
+
+  useEffect(() => {
+    if (!flash) return
+    const timer = window.setTimeout(() => setFlash(null), 3200)
+    return () => window.clearTimeout(timer)
+  }, [flash])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -138,9 +156,13 @@ function App() {
     void reloadAll()
   }, [isAuthed])
 
+  function notify(type: 'success' | 'error', text: string): void {
+    setFlash({ type, text })
+  }
+
   async function signIn(): Promise<void> {
     if (!sessionEmail || !password) {
-      alert('Vyplň email a heslo')
+      notify('error', 'Vyplň email a heslo.')
       return
     }
     setBusy(true)
@@ -150,9 +172,10 @@ function App() {
     })
     setBusy(false)
     if (error) {
-      alert(`Login chyba: ${error.message}`)
+      notify('error', `Login chyba: ${error.message}`)
       return
     }
+    notify('success', 'Přihlášení proběhlo v pořádku.')
     await reloadAll()
   }
 
@@ -161,6 +184,7 @@ function App() {
     setTransactions([])
     setEvents([])
     setEmailLogs([])
+    setFlash(null)
   }
 
   async function reloadAll(): Promise<void> {
@@ -176,7 +200,7 @@ function App() {
 
     if (txRes.error) {
       setBusy(false)
-      alert(`Načtení transakcí selhalo: ${txRes.error.message}`)
+      notify('error', `Načtení transakcí selhalo: ${txRes.error.message}`)
       return
     }
 
@@ -245,7 +269,7 @@ function App() {
 
   async function createTransaction(): Promise<void> {
     if (!buyerName.trim() || !buyerEmail.trim() || !sellerName.trim() || !sellerEmail.trim()) {
-      alert('Buyer/seller jméno + email jsou povinné')
+      notify('error', 'Buyer/seller jméno + email jsou povinné.')
       return
     }
 
@@ -266,24 +290,15 @@ function App() {
     setBusy(false)
 
     if (error) {
-      alert(`Create transaction selhalo: ${error.message}`)
+      notify('error', `Create transaction selhalo: ${error.message}`)
       return
     }
 
+    notify('success', 'Transakce byla založena.')
     await reloadAll()
   }
 
-  async function changeStatus(tx: Transaction): Promise<void> {
-    const targetStatus = statusChange[tx.id]
-    if (!targetStatus) return
-
-    const note = (statusNote[tx.id] || '').trim()
-
-    if ((targetStatus === 'hold' || targetStatus === 'disputed') && !note) {
-      alert('Pro HOLD/SPOR zadej důvod')
-      return
-    }
-
+  async function executeStatusChange(tx: Transaction, targetStatus: EscrowStatus, note: string): Promise<void> {
     setBusy(true)
     const { error } = await supabase.rpc('dpt_change_status', {
       p_transaction_code: tx.transactionCode,
@@ -295,13 +310,33 @@ function App() {
     setBusy(false)
 
     if (error) {
-      alert(`Změna stavu selhala: ${error.message}`)
+      notify('error', `Změna stavu selhala: ${error.message}`)
       return
     }
 
     setStatusChange((prev) => ({ ...prev, [tx.id]: '' }))
     setStatusNote((prev) => ({ ...prev, [tx.id]: '' }))
+    notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
+  }
+
+  async function requestStatusChange(tx: Transaction): Promise<void> {
+    const targetStatus = statusChange[tx.id]
+    if (!targetStatus) return
+
+    const note = (statusNote[tx.id] || '').trim()
+
+    if ((targetStatus === 'hold' || targetStatus === 'disputed') && !note) {
+      notify('error', 'Pro HOLD/SPOR zadej důvod.')
+      return
+    }
+
+    if (isCriticalTransition(targetStatus)) {
+      setPendingAction({ tx, targetStatus, note })
+      return
+    }
+
+    await executeStatusChange(tx, targetStatus, note)
   }
 
   const summary = useMemo(() => {
@@ -354,10 +389,10 @@ function App() {
         </div>
         {isAuthed && (
           <div className="heroActions">
-            <button className="ghost" onClick={() => void reloadAll()} disabled={busy}>
+            <button className="btn btnGhost" onClick={() => void reloadAll()} disabled={busy}>
               Obnovit data
             </button>
-            <button className="ghost" onClick={() => void signOut()} disabled={busy}>
+            <button className="btn btnGhost" onClick={() => void signOut()} disabled={busy}>
               Odhlásit
             </button>
           </div>
@@ -365,10 +400,18 @@ function App() {
       </header>
 
       <section className="trustStrip">
-        <div><strong>🔒 Důvěra:</strong> kritické akce mají důvod + audit stopu</div>
-        <div><strong>⚡ Rychlost:</strong> pipeline K řešení / V procesu / Ukončeno</div>
-        <div><strong>📬 Transparentnost:</strong> email logy a eventy na jednom místě</div>
+        <div>
+          <strong>🔒 Důvěra:</strong> kritické akce mají důvod + audit stopu
+        </div>
+        <div>
+          <strong>⚡ Rychlost:</strong> pipeline K řešení / V procesu / Ukončeno
+        </div>
+        <div>
+          <strong>📬 Transparentnost:</strong> email logy a eventy na jednom místě
+        </div>
       </section>
+
+      {flash && <div className={`flash ${flash.type}`}>{flash.text}</div>}
 
       {!isAuthed ? (
         <section className="panel authPanel">
@@ -384,7 +427,7 @@ function App() {
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </label>
           </div>
-          <button className="primary" disabled={busy} onClick={() => void signIn()}>
+          <button className="btn btnPrimary" disabled={busy} onClick={() => void signIn()}>
             {busy ? 'Přihlašuji…' : 'Přihlásit'}
           </button>
         </section>
@@ -437,7 +480,7 @@ function App() {
                     <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
                   </label>
                 </div>
-                <button className="primary" onClick={() => void createTransaction()} disabled={busy}>
+                <button className="btn btnPrimary" onClick={() => void createTransaction()} disabled={busy}>
                   {busy ? 'Vytvářím…' : 'Vytvořit transakci'}
                 </button>
               </section>
@@ -472,7 +515,7 @@ function App() {
                         change={statusChange[tx.id] || ''}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
-                        onApply={() => void changeStatus(tx)}
+                        onApply={() => void requestStatusChange(tx)}
                       />
                     ))}
                   </div>
@@ -487,7 +530,7 @@ function App() {
                         change={statusChange[tx.id] || ''}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
-                        onApply={() => void changeStatus(tx)}
+                        onApply={() => void requestStatusChange(tx)}
                       />
                     ))}
                   </div>
@@ -502,7 +545,7 @@ function App() {
                         change={statusChange[tx.id] || ''}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
-                        onApply={() => void changeStatus(tx)}
+                        onApply={() => void requestStatusChange(tx)}
                       />
                     ))}
                   </div>
@@ -571,6 +614,21 @@ function App() {
             </section>
           )}
         </>
+      )}
+
+      {pendingAction && (
+        <ConfirmModal
+          title="Potvrzení kritické akce"
+          message={`Opravdu chceš změnit stav ${pendingAction.tx.transactionCode} na „${statusLabel[pendingAction.targetStatus]}“?`}
+          subText="Tato akce je auditovaná a může ovlivnit vyplacení peněz."
+          confirmLabel="Ano, potvrdit"
+          onCancel={() => setPendingAction(null)}
+          onConfirm={async () => {
+            const current = pendingAction
+            setPendingAction(null)
+            await executeStatusChange(current.tx, current.targetStatus, current.note)
+          }}
+        />
       )}
     </div>
   )
@@ -644,11 +702,45 @@ function TxCard({
           ))}
         </select>
         <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
-        <button className="primary" disabled={!change} onClick={onApply}>
+        <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
           Potvrdit změnu
         </button>
       </div>
     </article>
+  )
+}
+
+function ConfirmModal({
+  title,
+  message,
+  subText,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  title: string
+  message: string
+  subText: string
+  confirmLabel: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="modalOverlay" role="presentation" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <h3>{title}</h3>
+        <p>{message}</p>
+        <p className="hint">{subText}</p>
+        <div className="modalActions">
+          <button className="btn btnSecondary" onClick={onCancel}>
+            Zrušit
+          </button>
+          <button className="btn btnDanger" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
