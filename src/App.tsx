@@ -302,30 +302,18 @@ function App() {
 
   useEffect(() => {
     console.log('[Arc] Init: checking session...')
-    console.log('[Arc] localStorage keys:', Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('sb-')))
-    supabase.auth.getSession().then(async ({ data, error: sessionError }) => {
-      console.log('[Arc] getSession result:', { hasSession: Boolean(data.session), email: data.session?.user?.email, error: sessionError })
-      const email = data.session?.user?.email || ''
-      setSessionEmail(email)
-      setIsAuthed(Boolean(data.session))
-      if (data.session) {
-        const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
-        console.log('[Arc] dpt_current_role response:', { roleData, roleError, uid: data.session.user.id })
-        setUserRole(resolveUserRole(roleData))
-      } else {
-        console.log('[Arc] No session after getSession — user appears logged out')
-        setUserRole('unknown')
-      }
-    })
 
+    // Use onAuthStateChange as the SOLE source of truth for session state.
+    // Supabase v2 docs recommend this pattern — getSession can race with token refresh.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[Arc] onAuthStateChange:', event, { hasSession: Boolean(session), email: session?.user?.email })
       setSessionEmail(session?.user?.email || '')
       setIsAuthed(Boolean(session))
       if (session) {
         const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
-        console.log('[Arc] dpt_current_role onAuthChange:', { roleData, roleError, uid: session.user.id })
+        console.log('[Arc] dpt_current_role:', { roleData, roleError, uid: session.user.id })
         setUserRole(resolveUserRole(roleData))
       } else {
         setUserRole('unknown')
