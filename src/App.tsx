@@ -527,29 +527,41 @@ function App() {
     const scopes = apiKeyForm.scopes.split(',').map((s) => s.trim()).filter(Boolean)
     if (scopes.length === 0) { notify('error', 'Zadej alespoň jeden scope.'); return }
 
+    const expiresInDays = apiKeyForm.expiresInDays.trim() ? parseInt(apiKeyForm.expiresInDays, 10) : null
+    if (expiresInDays !== null && (!Number.isFinite(expiresInDays) || expiresInDays < 1)) {
+      notify('error', 'Expirace musí být kladné celé číslo (dny).')
+      return
+    }
+
     const prefix = `dpt_live_${mp.code.slice(0, 8)}_`
     const rawKey = generateRandomKey(prefix)
 
     setApiKeyBusy(true)
-    const { error } = await supabase.rpc('dpt_generate_api_key', {
-      p_marketplace_id: mp.id,
-      p_key_prefix: prefix,
-      p_raw_key: rawKey,
-      p_scopes: scopes,
-      p_label: label,
-      p_expires_in_days: apiKeyForm.expiresInDays ? parseInt(apiKeyForm.expiresInDays, 10) : null,
-    })
-    setApiKeyBusy(false)
+    try {
+      const { error } = await supabase.rpc('dpt_generate_api_key', {
+        p_marketplace_id: mp.id,
+        p_key_prefix: prefix,
+        p_raw_key: rawKey,
+        p_scopes: scopes,
+        p_label: label,
+        p_expires_in_days: expiresInDays,
+      })
 
-    if (error) {
-      notify('error', `Generování klíče: ${error.message}`)
-      return
+      if (error) {
+        notify('error', `Generování klíče: ${error.message}`)
+        return
+      }
+
+      setGeneratedKey(rawKey)
+      setApiKeyForm({ ...emptyApiKeyForm })
+      notify('success', 'API klíč vygenerován. Zkopíruj ho — nebude znovu zobrazen!')
+      await reloadAll()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      notify('error', `Generování klíče: ${message}`)
+    } finally {
+      setApiKeyBusy(false)
     }
-
-    setGeneratedKey(rawKey)
-    setApiKeyForm({ ...emptyApiKeyForm })
-    notify('success', 'API klíč vygenerován. Zkopíruj ho — nebude znovu zobrazen!')
-    await reloadAll()
   }
 
   async function revokeApiKey(keyId: string, reason: string): Promise<void> {
