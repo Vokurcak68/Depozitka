@@ -770,13 +770,14 @@ function App() {
     }
 
     const trigger = await triggerEngineEmailProcessing()
+    console.log('[Depozitka] Engine trigger result:', JSON.stringify(trigger))
 
     setManualEmailBusy((prev) => ({ ...prev, [tx.id]: false }))
 
     if (trigger.ok) {
       notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×) a engine je hned zpracoval.')
     } else {
-      notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×). Engine trigger selhal: ' + (trigger.detail || 'neznámá chyba'))
+      notify('error', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×). Engine trigger selhal: ' + (trigger.detail || 'neznámá chyba'))
     }
 
     await reloadAll()
