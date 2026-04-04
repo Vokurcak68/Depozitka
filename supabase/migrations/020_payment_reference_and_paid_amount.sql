@@ -14,8 +14,9 @@ language plpgsql
 as $$
 begin
   if new.payment_reference is null or trim(new.payment_reference) = '' then
-    -- Extract digits only from transaction_code: "DPT-2026-123456" → "2026123456"
-    new.payment_reference := regexp_replace(new.transaction_code, '[^0-9]', '', 'g');
+    -- Extract digits from transaction_code: "DPT-2026-123456" → "2026123456"
+    -- Czech VS max 10 digits — right-trim to 10 if longer
+    new.payment_reference := left(regexp_replace(new.transaction_code, '[^0-9]', '', 'g'), 10);
   end if;
   return new;
 end;
@@ -29,7 +30,7 @@ create trigger trg_dpt_tx_auto_payment_ref
 
 -- 3) Backfill existing transactions that have NULL payment_reference
 update public.dpt_transactions
-  set payment_reference = regexp_replace(transaction_code, '[^0-9]', '', 'g')
+  set payment_reference = left(regexp_replace(transaction_code, '[^0-9]', '', 'g'), 10)
   where payment_reference is null or trim(payment_reference) = '';
 
 -- 4) Index for fast VS lookup during fio-sync
