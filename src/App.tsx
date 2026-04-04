@@ -62,6 +62,10 @@ interface EmailLog {
   subject: string
   status: string
   createdAt: string
+  sentAt?: string | null
+  provider?: string | null
+  providerMessageId?: string | null
+  errorMessage?: string | null
 }
 
 interface PendingAction {
@@ -463,7 +467,7 @@ function App() {
 
     const mailRes = await supabase
       .from('dpt_email_logs')
-      .select('id, transaction_id, template_key, to_email, subject, status, created_at')
+      .select('id, transaction_id, template_key, to_email, subject, status, created_at, sent_at, provider, provider_message_id, error_message')
       .order('created_at', { ascending: false })
       .limit(250)
 
@@ -477,6 +481,10 @@ function App() {
           subject: row.subject,
           status: row.status,
           createdAt: row.created_at,
+          sentAt: row.sent_at,
+          provider: row.provider,
+          providerMessageId: row.provider_message_id,
+          errorMessage: row.error_message,
         })),
       )
     }
@@ -1102,6 +1110,9 @@ function App() {
                       <th>Komu</th>
                       <th>Předmět</th>
                       <th>Stav</th>
+                      <th>Odesláno</th>
+                      <th>Provider ID</th>
+                      <th>Chyba</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1113,6 +1124,9 @@ function App() {
                         <td>{log.toEmail}</td>
                         <td>{log.subject}</td>
                         <td>{log.status}</td>
+                        <td>{log.sentAt ? formatDate(log.sentAt) : '-'}</td>
+                        <td>{log.providerMessageId || '-'}</td>
+                        <td>{log.errorMessage || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
