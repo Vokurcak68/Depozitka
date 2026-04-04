@@ -254,6 +254,7 @@ function App() {
   const [isAuthed, setIsAuthed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [emailLogsError, setEmailLogsError] = useState<string | null>(null)
   const [theme, setTheme] = useState<Theme>(resolveInitialTheme)
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -300,6 +301,7 @@ function App() {
 
   useEffect(() => {
     if (!flash) return
+    if (flash.type === 'error') return
     const timer = window.setTimeout(() => setFlash(null), 3200)
     return () => window.clearTimeout(timer)
   }, [flash])
@@ -472,6 +474,7 @@ function App() {
       .limit(250)
 
     if (!mailRes.error) {
+      setEmailLogsError(null)
       setEmailLogs(
         (mailRes.data || []).map((row) => ({
           id: row.id,
@@ -487,6 +490,9 @@ function App() {
           errorMessage: row.error_message,
         })),
       )
+    } else {
+      setEmailLogs([])
+      setEmailLogsError(mailRes.error.message)
     }
 
     // load marketplaces
@@ -876,7 +882,12 @@ function App() {
         />
       )}
 
-      {flash && <div className={`flash ${flash.type}`}>{flash.text}</div>}
+      {flash && (
+        <div className={`flash ${flash.type}`} role="alert">
+          <span>{flash.text}</span>
+          <button className="btn btnGhost" style={{ marginLeft: 8, padding: '2px 8px' }} onClick={() => setFlash(null)}>Zavřít</button>
+        </div>
+      )}
 
       {!isAuthed ? (
         <section className="panel authPanel" id="login-panel">
@@ -1100,6 +1111,11 @@ function App() {
           {tab === 'emails' && (
             <section className="panel">
               <h2>Email logy ({emailLogs.length})</h2>
+              {emailLogsError && (
+                <p className="errorText" style={{ marginBottom: 12 }}>
+                  Načtení email logů selhalo: {emailLogsError}
+                </p>
+              )}
               <div className="tableWrap">
                 <table>
                   <thead>
