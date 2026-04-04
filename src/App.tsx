@@ -301,17 +301,9 @@ function App() {
   }, [flash])
 
   useEffect(() => {
-    console.log('[Arc] Init: checking session...')
-
     const applySessionState = async (
       session: { user: { id: string; email?: string | null } } | null,
-      source: string,
     ) => {
-      console.log(`[Arc] applySessionState (${source})`, {
-        hasSession: Boolean(session),
-        email: session?.user?.email,
-      })
-
       setSessionEmail(session?.user?.email || '')
       setIsAuthed(Boolean(session))
 
@@ -320,35 +312,26 @@ function App() {
         return
       }
 
-      const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
-      console.log('[Arc] dpt_current_role:', { roleData, roleError, uid: session.user.id })
+      const { data: roleData } = await supabase.rpc('dpt_current_role')
       setUserRole(resolveUserRole(roleData))
     }
 
     // Bootstrap stavu po F5 — nespoléhat jen na event callback.
     void supabase.auth.getSession().then(({ data, error }) => {
-      if (error) {
-        console.error('[Arc] getSession error:', error)
-        return
-      }
-      void applySessionState(data.session as any, 'getSession')
+      if (error) return
+      void applySessionState(data.session as any)
     })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('[Arc] onAuthStateChange:', event, {
-        hasSession: Boolean(session),
-        email: session?.user?.email,
-      })
-      void applySessionState(session as any, `onAuthStateChange:${event}`)
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void applySessionState(session as any)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
-    console.log('[Arc] isAuthed changed:', isAuthed, 'userRole:', userRole)
     if (!isAuthed) return
     void reloadAll()
   }, [isAuthed])
@@ -389,7 +372,6 @@ function App() {
   }
 
   async function reloadAll(): Promise<void> {
-    console.log('[Arc] reloadAll start')
     setBusy(true)
 
     try {
@@ -401,7 +383,6 @@ function App() {
       .order('created_at', { ascending: false })
       .limit(300)
 
-    console.log('[Arc] txRes:', { error: txRes.error?.message, count: txRes.data?.length })
 
     if (txRes.error) {
       setBusy(false)
@@ -517,16 +498,12 @@ function App() {
           createdAt: r.created_at,
         })))
       } else {
-        console.warn('[Arc] dpt_api_keys load skipped:', akRes.error.message)
       }
     } catch (e) {
-      console.warn('[Arc] dpt_api_keys load failed:', e)
     }
 
     setBusy(false)
-    console.log('[Arc] reloadAll done')
     } catch (err) {
-      console.error('[Arc] reloadAll CRASHED:', err)
       setBusy(false)
     }
   }
