@@ -303,21 +303,45 @@ function App() {
   useEffect(() => {
     console.log('[Arc] Init: checking session...')
 
-    // Use onAuthStateChange as the SOLE source of truth for session state.
-    // Supabase v2 docs recommend this pattern — getSession can race with token refresh.
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[Arc] onAuthStateChange:', event, { hasSession: Boolean(session), email: session?.user?.email })
+    const applySessionState = async (
+      session: { user: { id: string; email?: string | null } } | null,
+      source: string,
+    ) => {
+      console.log(`[Arc] applySessionState (${source})`, {
+        hasSession: Boolean(session),
+        email: session?.user?.email,
+      })
+
       setSessionEmail(session?.user?.email || '')
       setIsAuthed(Boolean(session))
-      if (session) {
-        const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
-        console.log('[Arc] dpt_current_role:', { roleData, roleError, uid: session.user.id })
-        setUserRole(resolveUserRole(roleData))
-      } else {
+
+      if (!session) {
         setUserRole('unknown')
+        return
       }
+
+      const { data: roleData, error: roleError } = await supabase.rpc('dpt_current_role')
+      console.log('[Arc] dpt_current_role:', { roleData, roleError, uid: session.user.id })
+      setUserRole(resolveUserRole(roleData))
+    }
+
+    // Bootstrap stavu po F5 — nespoléhat jen na event callback.
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (error) {
+        console.error('[Arc] getSession error:', error)
+        return
+      }
+      void applySessionState(data.session as any, 'getSession')
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('[Arc] onAuthStateChange:', event, {
+        hasSession: Boolean(session),
+        email: session?.user?.email,
+      })
+      void applySessionState(session as any, `onAuthStateChange:${event}`)
     })
 
     return () => subscription.unsubscribe()
