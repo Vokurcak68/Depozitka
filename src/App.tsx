@@ -340,6 +340,29 @@ function App() {
     setFlash({ type, text })
   }
 
+  async function triggerEngineEmailProcessing(): Promise<{ ok: boolean; detail?: string }> {
+    const base = (import.meta.env.VITE_ENGINE_URL || '').trim()
+    const path = (import.meta.env.VITE_ENGINE_PROCESS_EMAILS_PATH || '/api/cron/process-emails').trim()
+    const token = (import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()
+
+    if (!base || !token) {
+      return { ok: false, detail: 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.' }
+    }
+
+    const url = `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+
+    try {
+      const res = await fetch(`${url}?token=${encodeURIComponent(token)}`, { method: 'GET' })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        return { ok: false, detail: `Engine trigger ${res.status}${body ? `: ${body.slice(0, 120)}` : ''}` }
+      }
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   async function signIn(): Promise<void> {
     if (!sessionEmail || !password) {
       notify('error', 'Vyplň email a heslo.')
@@ -732,8 +755,16 @@ function App() {
       }
     }
 
+    const trigger = await triggerEngineEmailProcessing()
+
     setManualEmailBusy((prev) => ({ ...prev, [tx.id]: false }))
-    notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×).')
+
+    if (trigger.ok) {
+      notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×) a engine je hned zpracoval.')
+    } else {
+      notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×). Engine trigger selhal: ' + (trigger.detail || 'neznámá chyba'))
+    }
+
     await reloadAll()
   }
 
