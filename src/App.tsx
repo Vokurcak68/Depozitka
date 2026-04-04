@@ -77,11 +77,13 @@ interface PendingAction {
 interface Marketplace {
   id: string; code: string; name: string; active: boolean; feeSharePercent: number
   settlementAccountName: string; settlementIban: string; settlementBic: string; notes: string
+  logoUrl: string; accentColor: string; companyName: string; companyAddress: string; companyId: string; supportEmail: string; websiteUrl: string
 }
 
 interface MarketplaceForm {
   code: string; name: string; feeSharePercent: string
   settlementAccountName: string; settlementIban: string; settlementBic: string; notes: string
+  logoUrl: string; accentColor: string; companyName: string; companyAddress: string; companyId: string; supportEmail: string; websiteUrl: string
 }
 
 interface SellerPayoutForm {
@@ -108,7 +110,7 @@ interface ApiKeyCreateForm {
   expiresInDays: string
 }
 
-const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '' }
+const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '', logoUrl: '', accentColor: '#2563eb', companyName: '', companyAddress: '', companyId: '', supportEmail: '', websiteUrl: '' }
 const emptySpForm: SellerPayoutForm = { transactionCode: '', iban: '', accountName: '', bic: '' }
 const emptyApiKeyForm: ApiKeyCreateForm = { label: '', scopes: 'transactions:create,transactions:read', expiresInDays: '' }
 
@@ -498,7 +500,7 @@ function App() {
     // load marketplaces
     const mpRes = await supabase
       .from('dpt_marketplaces')
-      .select('id, code, name, active, fee_share_percent, settlement_account_name, settlement_iban, settlement_bic, notes')
+      .select('id, code, name, active, fee_share_percent, settlement_account_name, settlement_iban, settlement_bic, notes, logo_url, accent_color, company_name, company_address, company_id, support_email, website_url')
       .order('name', { ascending: true })
 
     if (!mpRes.error) {
@@ -509,6 +511,10 @@ function App() {
         settlementIban: r.settlement_iban || '',
         settlementBic: r.settlement_bic || '',
         notes: r.notes || '',
+        logoUrl: r.logo_url || '', accentColor: r.accent_color || '#2563eb',
+        companyName: r.company_name || '', companyAddress: r.company_address || '',
+        companyId: r.company_id || '', supportEmail: r.support_email || '',
+        websiteUrl: r.website_url || '',
       })))
     }
 
@@ -620,7 +626,7 @@ function App() {
     setMarketplaceCode(code)
     const m = marketplaces.find((x) => x.code === code)
     if (m) {
-      setMarketplaceForm({ code: m.code, name: m.name, feeSharePercent: String(m.feeSharePercent), settlementAccountName: m.settlementAccountName, settlementIban: m.settlementIban, settlementBic: m.settlementBic, notes: m.notes })
+      setMarketplaceForm({ code: m.code, name: m.name, feeSharePercent: String(m.feeSharePercent), settlementAccountName: m.settlementAccountName, settlementIban: m.settlementIban, settlementBic: m.settlementBic, notes: m.notes, logoUrl: m.logoUrl, accentColor: m.accentColor, companyName: m.companyName, companyAddress: m.companyAddress, companyId: m.companyId, supportEmail: m.supportEmail, websiteUrl: m.websiteUrl })
     } else {
       setMarketplaceForm({ ...emptyMpForm })
     }
@@ -637,6 +643,13 @@ function App() {
       settlement_iban: normalizeIban(marketplaceForm.settlementIban) || null,
       settlement_bic: marketplaceForm.settlementBic.trim().toUpperCase() || null,
       notes: marketplaceForm.notes.trim() || null,
+      logo_url: marketplaceForm.logoUrl.trim() || null,
+      accent_color: marketplaceForm.accentColor.trim() || '#2563eb',
+      company_name: marketplaceForm.companyName.trim() || null,
+      company_address: marketplaceForm.companyAddress.trim() || null,
+      company_id: marketplaceForm.companyId.trim() || null,
+      support_email: marketplaceForm.supportEmail.trim() || null,
+      website_url: marketplaceForm.websiteUrl.trim() || null,
     }, { onConflict: 'code' })
     setMarketplaceBusy(false)
     if (error) { notify('error', `Save marketplace: ${error.message}`); return }
@@ -1204,10 +1217,21 @@ function App() {
                   <div className="formGrid">
                     <label>Code<input value={marketplaceForm.code} onChange={(e) => setMarketplaceForm((p) => ({ ...p, code: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} /></label>
                     <label>Name<input value={marketplaceForm.name} onChange={(e) => setMarketplaceForm((p) => ({ ...p, name: e.target.value }))} /></label>
+                    <h4 style={{ marginBottom: '4px', color: '#6b7280', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', gridColumn: '1 / -1' }}>⚙️ Provozní údaje</h4>
                     <label>Fee share %<input type="number" min={0} max={100} step={0.1} value={marketplaceForm.feeSharePercent} onChange={(e) => setMarketplaceForm((p) => ({ ...p, feeSharePercent: e.target.value }))} /></label>
                     <label>Settlement account name<input value={marketplaceForm.settlementAccountName} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementAccountName: e.target.value }))} /></label>
                     <label>Settlement IBAN<input value={marketplaceForm.settlementIban} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementIban: e.target.value }))} /></label>
                     <label>Settlement BIC<input value={marketplaceForm.settlementBic} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementBic: e.target.value }))} /></label>
+                  </div>
+                  <h4 style={{ marginTop: '20px', marginBottom: '8px', borderTop: '1px solid #e5e7eb', paddingTop: '16px', color: '#6b7280', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📧 E-mail branding</h4>
+                  <div className="formGrid">
+                    <label>Logo URL<input value={marketplaceForm.logoUrl} onChange={(e) => setMarketplaceForm((p) => ({ ...p, logoUrl: e.target.value }))} placeholder="https://..." /></label>
+                    <label>Accent barva<input type="color" value={marketplaceForm.accentColor} onChange={(e) => setMarketplaceForm((p) => ({ ...p, accentColor: e.target.value }))} style={{ height: '38px' }} /></label>
+                    <label>Název firmy<input value={marketplaceForm.companyName} onChange={(e) => setMarketplaceForm((p) => ({ ...p, companyName: e.target.value }))} placeholder="Firma s.r.o." /></label>
+                    <label>Adresa firmy<input value={marketplaceForm.companyAddress} onChange={(e) => setMarketplaceForm((p) => ({ ...p, companyAddress: e.target.value }))} placeholder="Ulice 123, 110 00 Praha" /></label>
+                    <label>IČO / DIČ<input value={marketplaceForm.companyId} onChange={(e) => setMarketplaceForm((p) => ({ ...p, companyId: e.target.value }))} placeholder="12345678" /></label>
+                    <label>Kontaktní email<input type="email" value={marketplaceForm.supportEmail} onChange={(e) => setMarketplaceForm((p) => ({ ...p, supportEmail: e.target.value }))} placeholder="info@example.cz" /></label>
+                    <label>Web<input type="url" value={marketplaceForm.websiteUrl} onChange={(e) => setMarketplaceForm((p) => ({ ...p, websiteUrl: e.target.value }))} placeholder="https://example.cz" /></label>
                   </div>
                   <label>Notes<textarea value={marketplaceForm.notes} onChange={(e) => setMarketplaceForm((p) => ({ ...p, notes: e.target.value }))} rows={3} /></label>
                   <div className="rowActions">
