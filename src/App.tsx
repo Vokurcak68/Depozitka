@@ -449,6 +449,12 @@ function App() {
     })
     setTransactions(txRows)
 
+    // Keep drawer in sync after reload
+    setSelectedTx((prev) => {
+      if (!prev) return null
+      return txRows.find((t) => t.id === prev.id) || null
+    })
+
     const evRes = await supabase
       .from('dpt_transaction_events')
       .select('id, transaction_id, event_type, old_status, new_status, note, created_at')
