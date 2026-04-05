@@ -973,3 +973,109 @@ code {
   flex: 1;
   min-width: 200px;
 }
+
+/* ── Bank tab responsive ── */
+
+.bankFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.bankFilters .btn {
+  font-size: 0.82rem;
+  padding: 5px 12px;
+}
+
+/* Desktop: show table, hide cards */
+.bankDesktop { display: block; }
+.bankMobile { display: none; }
+
+/* Mobile cards */
+.bankCard {
+  background: var(--input-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.bankCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.bankCardAmount {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.bankCardMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.bankCardMeta code {
+  font-size: 0.82rem;
+}
+
+.bankCardDetail {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.bankCardActions {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bankCardActions select,
+.bankCardActions input {
+  width: 100%;
+  font-size: 0.9rem;
+  padding: 8px 10px;
+}
+
+.bankCardActions .btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 0.9rem;
+}
+
+.bankCardIgnore {
+  display: flex;
+  gap: 6px;
+}
+
+.bankCardIgnore input {
+  flex: 1;
+}
+
+.bankCardIgnore .btn {
+  width: auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .bankDesktop { display: none; }
+  .bankMobile { display: block; }
+
+  .bankFilters {
+    gap: 4px;
+  }
+
+  .bankFilters .btn {
+    font-size: 0.75rem;
+    padding: 4px 8px;
+  }
+}

@@ -1593,7 +1593,7 @@ function App() {
                   <StatCard label="Přeplatky" value={String(counts.overpaid)} tone={counts.overpaid > 0 ? 'danger' : 'neutral'} />
                 </section>
 
-                <div className="filterRow" style={{ marginBottom: 12 }}>
+                <div className="bankFilters">
                   {(['all', 'unmatched', 'matched', 'ignored', 'overpaid'] as BankFilter[]).map((f) => (
                     <button key={f} className={bankFilter === f ? 'btn btnPrimary' : 'btn btnSecondary'} onClick={() => setBankFilter(f)}>
                       {{ all: 'Vše', unmatched: 'Nespárované', matched: 'Spárované', ignored: 'Ignorované', overpaid: 'Přeplatky' }[f]}
@@ -1604,87 +1604,112 @@ function App() {
                 {filtered.length === 0 ? (
                   <p className="muted">Žádné pohyby v tomto filtru.</p>
                 ) : (
-                  <div className="tableWrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Datum</th>
-                          <th>Částka</th>
-                          <th>VS</th>
-                          <th>Protiúčet</th>
-                          <th>Zpráva</th>
-                          <th>Stav</th>
-                          <th>Transakce</th>
-                          <th>Akce</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map((b) => (
-                          <tr key={b.id}>
-                            <td>{b.date ? formatDate(b.date) : '-'}</td>
-                            <td style={{ fontWeight: 600 }}>{formatPrice(b.amount)}</td>
-                            <td><code>{b.variableSymbol || '-'}</code></td>
-                            <td style={{ fontSize: '0.85em' }}>{b.counterAccount || '-'}</td>
-                            <td style={{ fontSize: '0.85em', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.message || '-'}</td>
-                            <td>
-                              {b.ignored && <span className="badge" style={{ background: '#6b7280' }}>Ignorováno</span>}
-                              {b.matched && !b.overpaid && <span className="badge" style={{ background: '#22c55e' }}>Spárováno</span>}
-                              {b.overpaid && <span className="badge" style={{ background: '#ef4444' }}>⚠️ Přeplatek</span>}
-                              {!b.matched && !b.ignored && <span className="badge" style={{ background: '#f59e0b' }}>Nespárováno</span>}
-                            </td>
-                            <td>
-                              {b.matchedTransactionCode ? <code>{b.matchedTransactionCode}</code> : '-'}
-                              {b.ignored && b.ignoredReason ? <small style={{ display: 'block', color: '#9ca3af' }}>{b.ignoredReason}</small> : null}
-                            </td>
-                            <td>
-                              {!b.matched && !b.ignored && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
-                                  <div style={{ display: 'flex', gap: 4 }}>
-                                    <select
-                                      value={bankMatchTxId[b.bankTxId] || ''}
-                                      onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}
-                                      style={{ flex: 1, fontSize: '0.85em' }}
-                                    >
-                                      <option value="">Přiřadit k…</option>
-                                      {payableTxs.map((tx) => (
-                                        <option key={tx.id} value={tx.id}>
-                                          {tx.transactionCode} · {formatPrice(tx.amountCzk)} · {tx.buyerName}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <button
-                                      className="btn btnPrimary"
-                                      style={{ fontSize: '0.8em', padding: '2px 8px' }}
-                                      disabled={bankBusy || !bankMatchTxId[b.bankTxId]}
-                                      onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}
-                                    >
-                                      ✓
-                                    </button>
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 4 }}>
-                                    <input
-                                      value={bankIgnoreReason[b.bankTxId] || ''}
-                                      onChange={(e) => setBankIgnoreReason((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}
-                                      placeholder="Důvod ignorování…"
-                                      style={{ flex: 1, fontSize: '0.85em' }}
-                                    />
-                                    <button
-                                      className="btn btnSecondary"
-                                      style={{ fontSize: '0.8em', padding: '2px 8px' }}
-                                      disabled={bankBusy}
-                                      onClick={() => void ignoreBankPayment(b.bankTxId, bankIgnoreReason[b.bankTxId] || '')}
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    {/* Desktop table */}
+                    <div className="bankDesktop">
+                      <div className="tableWrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Datum</th>
+                              <th>Částka</th>
+                              <th>VS</th>
+                              <th>Protiúčet</th>
+                              <th>Zpráva</th>
+                              <th>Stav</th>
+                              <th>Transakce</th>
+                              <th>Akce</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.map((b) => (
+                              <tr key={b.id}>
+                                <td>{b.date ? formatDate(b.date) : '-'}</td>
+                                <td style={{ fontWeight: 600 }}>{formatPrice(b.amount)}</td>
+                                <td><code>{b.variableSymbol || '-'}</code></td>
+                                <td style={{ fontSize: '0.85em' }}>{b.counterAccount || '-'}</td>
+                                <td style={{ fontSize: '0.85em', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.message || '-'}</td>
+                                <td>
+                                  {b.ignored && <span className="badge" style={{ background: '#6b7280' }}>Ignorováno</span>}
+                                  {b.matched && !b.overpaid && <span className="badge" style={{ background: '#22c55e' }}>Spárováno</span>}
+                                  {b.overpaid && <span className="badge" style={{ background: '#ef4444' }}>⚠️ Přeplatek</span>}
+                                  {!b.matched && !b.ignored && <span className="badge" style={{ background: '#f59e0b' }}>Nespárováno</span>}
+                                </td>
+                                <td>
+                                  {b.matchedTransactionCode ? <code>{b.matchedTransactionCode}</code> : '-'}
+                                  {b.ignored && b.ignoredReason ? <small style={{ display: 'block', color: '#9ca3af' }}>{b.ignoredReason}</small> : null}
+                                </td>
+                                <td>
+                                  {!b.matched && !b.ignored && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+                                      <div style={{ display: 'flex', gap: 4 }}>
+                                        <select
+                                          value={bankMatchTxId[b.bankTxId] || ''}
+                                          onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}
+                                          style={{ flex: 1, fontSize: '0.85em' }}
+                                        >
+                                          <option value="">Přiřadit k…</option>
+                                          {payableTxs.map((tx) => (
+                                            <option key={tx.id} value={tx.id}>
+                                              {tx.transactionCode} · {formatPrice(tx.amountCzk)} · {tx.buyerName}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <button className="btn btnPrimary" style={{ fontSize: '0.8em', padding: '2px 8px' }} disabled={bankBusy || !bankMatchTxId[b.bankTxId]} onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}>✓</button>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 4 }}>
+                                        <input value={bankIgnoreReason[b.bankTxId] || ''} onChange={(e) => setBankIgnoreReason((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))} placeholder="Důvod ignorování…" style={{ flex: 1, fontSize: '0.85em' }} />
+                                        <button className="btn btnSecondary" style={{ fontSize: '0.8em', padding: '2px 8px' }} disabled={bankBusy} onClick={() => void ignoreBankPayment(b.bankTxId, bankIgnoreReason[b.bankTxId] || '')}>✕</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Mobile cards */}
+                    <div className="bankMobile">
+                      {filtered.map((b) => (
+                        <div key={b.id} className="bankCard">
+                          <div className="bankCardHeader">
+                            <span className="bankCardAmount">{formatPrice(b.amount)}</span>
+                            {b.ignored && <span className="badge" style={{ background: '#6b7280' }}>Ignorováno</span>}
+                            {b.matched && !b.overpaid && <span className="badge" style={{ background: '#22c55e' }}>Spárováno</span>}
+                            {b.overpaid && <span className="badge" style={{ background: '#ef4444' }}>⚠️ Přeplatek</span>}
+                            {!b.matched && !b.ignored && <span className="badge" style={{ background: '#f59e0b' }}>Nespárováno</span>}
+                          </div>
+                          <div className="bankCardMeta">
+                            <span>{b.date ? formatDate(b.date) : '-'}</span>
+                            <span>VS: <code>{b.variableSymbol || '-'}</code></span>
+                          </div>
+                          {b.counterAccount && <div className="bankCardDetail">Protiúčet: {b.counterAccount}</div>}
+                          {b.message && <div className="bankCardDetail">{b.message}</div>}
+                          {b.matchedTransactionCode && <div className="bankCardDetail">Transakce: <code>{b.matchedTransactionCode}</code></div>}
+                          {b.ignored && b.ignoredReason && <div className="bankCardDetail" style={{ color: '#9ca3af' }}>Důvod: {b.ignoredReason}</div>}
+
+                          {!b.matched && !b.ignored && (
+                            <div className="bankCardActions">
+                              <select value={bankMatchTxId[b.bankTxId] || ''} onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}>
+                                <option value="">Přiřadit k transakci…</option>
+                                {payableTxs.map((tx) => (
+                                  <option key={tx.id} value={tx.id}>{tx.transactionCode} · {formatPrice(tx.amountCzk)}</option>
+                                ))}
+                              </select>
+                              <button className="btn btnPrimary" disabled={bankBusy || !bankMatchTxId[b.bankTxId]} onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}>Přiřadit</button>
+                              <div className="bankCardIgnore">
+                                <input value={bankIgnoreReason[b.bankTxId] || ''} onChange={(e) => setBankIgnoreReason((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))} placeholder="Důvod…" />
+                                <button className="btn btnSecondary" disabled={bankBusy} onClick={() => void ignoreBankPayment(b.bankTxId, bankIgnoreReason[b.bankTxId] || '')}>Ignorovat</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </section>
             )
