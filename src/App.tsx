@@ -40,6 +40,8 @@ interface Transaction {
   amountCzk: number
   feeAmountCzk: number
   payoutAmountCzk: number
+  paidAmountCzk: number
+  paymentReference: string
   status: EscrowStatus
   updatedAt: string
 }
@@ -294,6 +296,7 @@ function App() {
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
+  const [manualPaidAmount, setManualPaidAmount] = useState<Record<string, string>>({})
   const [manualEmailBusy, setManualEmailBusy] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
@@ -425,7 +428,7 @@ function App() {
     const txRes = await supabase
       .from('dpt_transactions')
       .select(
-        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, status, updated_at, dpt_marketplaces(code, name)',
+        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, status, updated_at, dpt_marketplaces(code, name)',
       )
       .order('created_at', { ascending: false })
       .limit(300)
@@ -459,6 +462,8 @@ function App() {
         amountCzk: Number(row.amount_czk),
         feeAmountCzk: Number(row.fee_amount_czk),
         payoutAmountCzk: Number(row.payout_amount_czk),
+        paidAmountCzk: Number(row.paid_amount || 0),
+        paymentReference: row.payment_reference || '',
         status: row.status,
         updatedAt: row.updated_at,
       }
@@ -738,8 +743,45 @@ function App() {
     await reloadAll()
   }
 
+  function parseManualAmount(raw: string): number | null {
+    const normalized = (raw || '').replace(/\s+/g, '').replace(',', '.').trim()
+    if (!normalized) return null
+    const num = Number(normalized)
+    if (!Number.isFinite(num) || num < 0) return null
+    return Math.round(num * 100) / 100
+  }
+
   async function executeStatusChange(tx: Transaction, targetStatus: EscrowStatus, note: string): Promise<void> {
+    const manualRaw = manualPaidAmount[tx.id] || ''
+    const manualAmount = parseManualAmount(manualRaw)
+
+    if (targetStatus === 'partial_paid') {
+      if (manualAmount === null) {
+        notify('error', 'Pro stav Částečně zaplaceno zadej ručně částku, která už přišla.')
+        return
+      }
+      if (manualAmount <= 0 || manualAmount >= tx.amountCzk) {
+        notify('error', 'Částečná úhrada musí být > 0 a zároveň menší než celková částka.')
+        return
+      }
+    }
+
     setBusy(true)
+
+    if (targetStatus === 'partial_paid' || targetStatus === 'paid') {
+      const paidAmount = targetStatus === 'paid' ? (manualAmount ?? tx.amountCzk) : (manualAmount as number)
+      const { error: paidErr } = await supabase
+        .from('dpt_transactions')
+        .update({ paid_amount: paidAmount })
+        .eq('id', tx.id)
+
+      if (paidErr) {
+        setBusy(false)
+        notify('error', 'Uložení ruční úhrady selhalo: ' + paidErr.message)
+        return
+      }
+    }
+
     const { error } = await supabase.rpc('dpt_change_status', {
       p_transaction_code: tx.transactionCode,
       p_new_status: targetStatus,
@@ -756,11 +798,16 @@ function App() {
 
     setStatusChange((prev) => ({ ...prev, [tx.id]: '' }))
     setStatusNote((prev) => ({ ...prev, [tx.id]: '' }))
+    setManualPaidAmount((prev) => ({ ...prev, [tx.id]: '' }))
     notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
 
     // Send emails immediately for the new status (no queue)
-    const updatedTx: Transaction = { ...tx, status: targetStatus }
+    const updatedTx: Transaction = {
+      ...tx,
+      status: targetStatus,
+      paidAmountCzk: targetStatus === 'paid' ? (manualAmount ?? tx.amountCzk) : targetStatus === 'partial_paid' ? (manualAmount ?? tx.paidAmountCzk) : tx.paidAmountCzk,
+    }
     const targets = getEmailTargetsForStatus(updatedTx, sessionEmail)
 
     if (targets.length > 0) {
@@ -1113,6 +1160,8 @@ function App() {
                         change={statusChange[tx.id] || ''}
                         emailBusy={Boolean(manualEmailBusy[tx.id])}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+                        paidAmount={manualPaidAmount[tx.id] || ''}
+                        onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
@@ -1132,6 +1181,8 @@ function App() {
                         change={statusChange[tx.id] || ''}
                         emailBusy={Boolean(manualEmailBusy[tx.id])}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+                        paidAmount={manualPaidAmount[tx.id] || ''}
+                        onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
@@ -1151,6 +1202,8 @@ function App() {
                         change={statusChange[tx.id] || ''}
                         emailBusy={Boolean(manualEmailBusy[tx.id])}
                         onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+                        paidAmount={manualPaidAmount[tx.id] || ''}
+                        onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
@@ -1419,6 +1472,8 @@ function App() {
           onClose={() => setSelectedTx(null)}
           onChange={(value) => setStatusChange((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onNote={(value) => setStatusNote((prev) => ({ ...prev, [selectedTx.id]: value }))}
+          paidAmount={manualPaidAmount[selectedTx.id] || ''}
+          onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onApply={() => void requestStatusChange(selectedTx)}
           onSendManualEmail={() => void sendManualEmailForTx(selectedTx)}
         />
@@ -1523,9 +1578,11 @@ function TxCard({
   tx,
   change,
   note,
+  paidAmount = '',
   emailBusy = false,
   onChange,
   onNote,
+  onPaidAmount,
   onApply,
   onOpenDetail,
   onSendManualEmail,
@@ -1533,9 +1590,11 @@ function TxCard({
   tx: Transaction
   change: EscrowStatus | ''
   note: string
+  paidAmount?: string
   emailBusy?: boolean
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
+  onPaidAmount?: (value: string) => void
   onApply: () => void
   onOpenDetail: () => void
   onSendManualEmail: () => void
@@ -1569,6 +1628,11 @@ function TxCard({
         <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
         <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
       </p>
+      {tx.paidAmountCzk > 0 && (
+        <p>
+          <strong>Uhrazeno:</strong> {formatPrice(tx.paidAmountCzk)} · <strong>Zbývá:</strong> {formatPrice(tx.amountCzk - tx.paidAmountCzk)}
+        </p>
+      )}
       <p>
         <strong>Update:</strong> {formatDate(tx.updatedAt)}
       </p>
@@ -1583,6 +1647,18 @@ function TxCard({
           ))}
         </select>
         <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
+        {change === 'partial_paid' && (
+          <input
+            type="number"
+            min={0}
+            max={tx.amountCzk}
+            step={0.01}
+            value={paidAmount}
+            onChange={(e) => onPaidAmount?.(e.target.value)}
+            placeholder="Již uhrazeno (Kč)"
+            style={{ borderColor: '#f59e0b' }}
+          />
+        )}
         <div className="txButtons">
           <button className="btn btnSecondary" onClick={onOpenDetail}>
             Detail
@@ -1604,10 +1680,12 @@ function TxDrawer({
   events,
   change,
   note,
+  paidAmount = '',
   emailBusy = false,
   onClose,
   onChange,
   onNote,
+  onPaidAmount,
   onApply,
   onSendManualEmail,
 }: {
@@ -1615,10 +1693,12 @@ function TxDrawer({
   events: TxEvent[]
   change: EscrowStatus | ''
   note: string
+  paidAmount?: string
   emailBusy?: boolean
   onClose: () => void
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
+  onPaidAmount?: (value: string) => void
   onApply: () => void
   onSendManualEmail: () => void
 }) {
@@ -1659,6 +1739,11 @@ function TxDrawer({
             <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
             <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
           </p>
+          {tx.paidAmountCzk > 0 && (
+            <p>
+              <strong>Uhrazeno:</strong> {formatPrice(tx.paidAmountCzk)} · <strong>Zbývá:</strong> {formatPrice(tx.amountCzk - tx.paidAmountCzk)}
+            </p>
+          )}
           <p>
             <strong>Update:</strong> {formatDate(tx.updatedAt)}
           </p>
@@ -1676,6 +1761,18 @@ function TxDrawer({
               ))}
             </select>
             <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
+            {change === 'partial_paid' && (
+              <input
+                type="number"
+                min={0}
+                max={tx.amountCzk}
+                step={0.01}
+                value={paidAmount}
+                onChange={(e) => onPaidAmount?.(e.target.value)}
+                placeholder="Již uhrazeno (Kč)"
+                style={{ borderColor: '#f59e0b' }}
+              />
+            )}
             <div className="txButtons">
               <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
                 {emailBusy ? 'Odesílám...' : 'Odeslat email dle stavu'}
