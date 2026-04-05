@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { supabase } from './lib/supabase'
 
@@ -44,6 +44,11 @@ interface Transaction {
   paymentReference: string
   status: EscrowStatus
   updatedAt: string
+  shippingCarrier: string
+  shippingTrackingNumber: string
+  shieldtrackShipmentId: string
+  stScore: number | null
+  stStatus: string | null
 }
 
 interface TxEvent {
@@ -455,7 +460,7 @@ function App() {
     const txRes = await supabase
       .from('dpt_transactions')
       .select(
-        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, status, updated_at, dpt_marketplaces(code, name)',
+        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, status, updated_at, shipping_carrier, shipping_tracking_number, shieldtrack_shipment_id, st_score, st_status, dpt_marketplaces(code, name)',
       )
       .order('created_at', { ascending: false })
       .limit(300)
@@ -493,6 +498,11 @@ function App() {
         paymentReference: row.payment_reference || '',
         status: row.status,
         updatedAt: row.updated_at,
+        shippingCarrier: row.shipping_carrier || '',
+        shippingTrackingNumber: row.shipping_tracking_number || '',
+        shieldtrackShipmentId: row.shieldtrack_shipment_id || '',
+        stScore: row.st_score ?? null,
+        stStatus: row.st_status ?? null,
       }
     })
     setTransactions(txRows)
@@ -1893,6 +1903,152 @@ function StatCard({
   )
 }
 
+// ---------------------------------------------------------------------------
+// ShieldTrack Verification Panel
+// ---------------------------------------------------------------------------
+
+const CHECK_NAME_CS: Record<string, string> = {
+  tracking_exists: 'Tracking číslo existuje',
+  tracking_active: 'Zásilka je aktivní',
+  recipient_name_match: 'Shoda jména příjemce',
+  city_match: 'Shoda města doručení',
+  zip_match: 'Shoda PSČ',
+  timeline_valid: 'Platná časová osa',
+  delivery_confirmed: 'Potvrzení doručení',
+}
+
+const CHECK_ICON: Record<string, string> = {
+  passed: '✅', warning: '⚠️', failed: '❌', pending: '⏳',
+}
+
+function getScoreColor(score: number): string {
+  if (score >= 80) return '#22c55e'
+  if (score >= 40) return '#f59e0b'
+  return '#ef4444'
+}
+
+interface STCheck { name: string; status: string; detail: string | null }
+interface STVerification {
+  score: number
+  status: string
+  checks: STCheck[]
+  address_match: { city: boolean; zip: boolean } | null
+  verified_at: string | null
+}
+
+function ShieldTrackPanel({ transactionId, cachedScore, cachedStatus }: { transactionId: string; cachedScore: number | null; cachedStatus: string | null }) {
+  const [verification, setVerification] = useState<STVerification | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [error, setError] = useState('')
+
+  const engineUrl = import.meta.env.VITE_ENGINE_URL || ''
+
+  const fetchVerification = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${engineUrl}/api/verification?transaction_id=${transactionId}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.available && data.verification) {
+        setVerification(data.verification)
+      } else {
+        setError('Verifikace není dostupná')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Chyba')
+    } finally {
+      setLoading(false)
+    }
+  }, [transactionId, engineUrl])
+
+  // Show cached summary + load details on expand
+  const score = verification?.score ?? cachedScore
+  const status = verification?.status ?? cachedStatus
+  const scoreColor = score != null ? getScoreColor(score) : '#6b7280'
+
+  const statusLabels: Record<string, string> = {
+    verified: '✅ Ověřeno',
+    partial: '⚠️ Částečně',
+    failed: '❌ Selhalo',
+    pending: '⏳ Čeká',
+  }
+
+  return (
+    <div className="drawerSection">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h4 style={{ margin: 0 }}>🛡️ ShieldTrack</h4>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {score != null && (
+            <span style={{ fontWeight: 700, color: scoreColor, fontSize: '1.1em' }}>
+              {score}/100
+            </span>
+          )}
+          {status && (
+            <span style={{ fontSize: '0.85em' }}>
+              {statusLabels[status] || status}
+            </span>
+          )}
+          <button
+            className="btn btnSecondary"
+            style={{ padding: '4px 10px', fontSize: '0.8em' }}
+            onClick={() => {
+              if (!expanded) fetchVerification()
+              setExpanded(!expanded)
+            }}
+          >
+            {expanded ? 'Skrýt' : 'Detail'}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: '12px' }}>
+          {loading && <p className="hint">⏳ Načítám verifikaci...</p>}
+          {error && <p className="hint" style={{ color: '#ef4444' }}>❌ {error}</p>}
+          {verification && (
+            <>
+              {/* Score bar */}
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ height: '6px', borderRadius: '3px', background: '#334155', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${verification.score}%`, background: getScoreColor(verification.score), borderRadius: '3px', transition: 'width 0.4s' }} />
+                </div>
+              </div>
+
+              {/* Checks */}
+              {verification.checks.map((check, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', padding: '4px 0', fontSize: '0.85em' }}>
+                  <span>{CHECK_ICON[check.status] || '⏳'}</span>
+                  <div>
+                    <strong>{CHECK_NAME_CS[check.name] || check.name}</strong>
+                    {check.detail && <div style={{ color: '#94a3b8', fontSize: '0.9em' }}>{check.detail}</div>}
+                  </div>
+                </div>
+              ))}
+
+              {verification.verified_at && (
+                <p style={{ fontSize: '0.75em', color: '#64748b', marginTop: '8px', textAlign: 'right' }}>
+                  Ověřeno: {new Date(verification.verified_at).toLocaleString('cs-CZ')}
+                </p>
+              )}
+
+              <button
+                className="btn btnSecondary"
+                style={{ marginTop: '8px', padding: '4px 10px', fontSize: '0.8em' }}
+                onClick={fetchVerification}
+                disabled={loading}
+              >
+                🔄 Obnovit
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TxCard({
   tx,
   change,
@@ -1959,6 +2115,17 @@ function TxCard({
       <p>
         <strong>Update:</strong> {formatDate(tx.updatedAt)}
       </p>
+      {tx.shippingCarrier && (
+        <p>
+          <strong>📦 Zásilka:</strong> {tx.shippingCarrier}
+          {tx.shippingTrackingNumber && <> · {tx.shippingTrackingNumber}</>}
+          {tx.stScore != null && (
+            <span style={{ marginLeft: '8px', fontWeight: 700, color: getScoreColor(tx.stScore) }}>
+              🛡️ {tx.stScore}/100
+            </span>
+          )}
+        </p>
+      )}
 
       <div className="txActions">
         <select value={change} onChange={(e) => onChange((e.target.value as EscrowStatus) || '')}>
@@ -2083,6 +2250,20 @@ function TxDrawer({
             <strong>Update:</strong> {formatDate(tx.updatedAt)}
           </p>
         </div>
+
+        {/* Shipping info */}
+        {tx.shippingCarrier && (
+          <div className="drawerSection">
+            <h4>📦 Zásilka</h4>
+            <p><strong>Dopravce:</strong> {tx.shippingCarrier}</p>
+            {tx.shippingTrackingNumber && <p><strong>Tracking:</strong> {tx.shippingTrackingNumber}</p>}
+          </div>
+        )}
+
+        {/* ShieldTrack verification */}
+        {tx.shieldtrackShipmentId && (
+          <ShieldTrackPanel transactionId={tx.id} cachedScore={tx.stScore} cachedStatus={tx.stStatus} />
+        )}
 
         <div className="drawerSection">
           <h4>Rychlá akce</h4>
