@@ -112,6 +112,24 @@ interface ApiKeyCreateForm {
   expiresInDays: string
 }
 
+type BankFilter = 'all' | 'unmatched' | 'matched' | 'ignored' | 'overpaid'
+
+interface BankTransaction {
+  id: string
+  bankTxId: string
+  amount: number
+  variableSymbol: string | null
+  date: string
+  counterAccount: string | null
+  message: string | null
+  matched: boolean
+  matchedTransactionId: string | null
+  matchedTransactionCode: string | null
+  ignored: boolean
+  ignoredReason: string | null
+  overpaid: boolean
+}
+
 const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '', logoUrl: '', accentColor: '#2563eb', companyName: '', companyAddress: '', companyId: '', supportEmail: '', websiteUrl: '' }
 const emptySpForm: SellerPayoutForm = { transactionCode: '', iban: '', accountName: '', bic: '' }
 const emptyApiKeyForm: ApiKeyCreateForm = { label: '', scopes: 'transactions:create,transactions:read', expiresInDays: '' }
@@ -257,7 +275,7 @@ function resolveInitialTheme(): Theme {
 }
 
 function App() {
-  const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [userRole, setUserRole] = useState<UserRole>('unknown')
   const [password, setPassword] = useState('')
@@ -292,6 +310,12 @@ function App() {
   const [generatedKey, setGeneratedKey] = useState<string | null>(null)
   const [sellerFallbackForm, setSellerFallbackForm] = useState<SellerPayoutForm>(emptySpForm)
   const [sellerFallbackBusy, setSellerFallbackBusy] = useState(false)
+
+  const [bankTxs, setBankTxs] = useState<BankTransaction[]>([])
+  const [bankFilter, setBankFilter] = useState<BankFilter>('all')
+  const [bankBusy, setBankBusy] = useState(false)
+  const [bankMatchTxId, setBankMatchTxId] = useState<Record<string, string>>({})
+  const [bankIgnoreReason, setBankIgnoreReason] = useState<Record<string, string>>({})
 
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
@@ -572,10 +596,86 @@ function App() {
     } catch (e) {
     }
 
+    // load bank transactions (non-critical)
+    try {
+      const bankRes = await supabase
+        .from('dpt_bank_transactions')
+        .select('id, bank_tx_id, amount, variable_symbol, date, counter_account, message, matched, matched_transaction_id, ignored, ignored_reason, overpaid')
+        .order('date', { ascending: false })
+        .limit(500)
+
+      if (!bankRes.error) {
+        setBankTxs((bankRes.data || []).map((r: any) => ({
+          id: r.id,
+          bankTxId: r.bank_tx_id,
+          amount: Number(r.amount),
+          variableSymbol: r.variable_symbol || null,
+          date: r.date || '',
+          counterAccount: r.counter_account || null,
+          message: r.message || null,
+          matched: Boolean(r.matched),
+          matchedTransactionId: r.matched_transaction_id || null,
+          matchedTransactionCode: r.matched_transaction_id ? (txRows.find((t) => t.id === r.matched_transaction_id)?.transactionCode || r.matched_transaction_id) : null,
+          ignored: Boolean(r.ignored),
+          ignoredReason: r.ignored_reason || null,
+          overpaid: Boolean(r.overpaid),
+        })))
+      }
+    } catch (e) {
+    }
+
     setBusy(false)
     } catch (err) {
       setBusy(false)
     }
+  }
+
+  async function manualMatchPayment(bankTxId: string, transactionId: string): Promise<void> {
+    setBankBusy(true)
+    const { data, error } = await supabase.rpc('dpt_manual_match_payment', {
+      p_bank_tx_id: bankTxId,
+      p_transaction_id: transactionId,
+    })
+    setBankBusy(false)
+
+    if (error) {
+      notify('error', `Párování selhalo: ${error.message}`)
+      return
+    }
+
+    const result = data as { ok: boolean; error?: string; transaction_code?: string; new_status?: string; overpaid?: boolean }
+    if (!result?.ok) {
+      notify('error', `Párování selhalo: ${result?.error || 'Neznámá chyba'}`)
+      return
+    }
+
+    notify('success', `Spárováno s ${result.transaction_code} → ${result.new_status}${result.overpaid ? ' ⚠️ PŘEPLATEK' : ''}`)
+    setBankMatchTxId((prev) => ({ ...prev, [bankTxId]: '' }))
+    await reloadAll()
+  }
+
+  async function ignoreBankPayment(bankTxId: string, reason: string): Promise<void> {
+    setBankBusy(true)
+    const { data, error } = await supabase.rpc('dpt_ignore_bank_payment', {
+      p_bank_tx_id: bankTxId,
+      p_reason: reason || null,
+    })
+    setBankBusy(false)
+
+    if (error) {
+      notify('error', `Ignorování selhalo: ${error.message}`)
+      return
+    }
+
+    const result = data as { ok: boolean; error?: string }
+    if (!result?.ok) {
+      notify('error', `Ignorování selhalo: ${result?.error || 'Neznámá chyba'}`)
+      return
+    }
+
+    notify('success', 'Platba označena jako ignorovaná')
+    setBankIgnoreReason((prev) => ({ ...prev, [bankTxId]: '' }))
+    await reloadAll()
   }
 
   function generateRandomKey(prefix: string): string {
@@ -1027,6 +1127,9 @@ function App() {
                   <button className={tab === 'seller-fallback' ? 'active' : ''} onClick={() => setTab('seller-fallback')}>
                     Seller payout
                   </button>
+                  <button className={tab === 'bank' ? 'active' : ''} onClick={() => setTab('bank')}>
+                    💰 Banka
+                  </button>
                 </>
               )}
             </nav>
@@ -1459,6 +1562,133 @@ function App() {
               </div>
             </section>
           )}
+
+          {canUseAdminTabs(userRole) && tab === 'bank' && (() => {
+            const filtered = bankTxs.filter((b) => {
+              if (bankFilter === 'unmatched') return !b.matched && !b.ignored
+              if (bankFilter === 'matched') return b.matched
+              if (bankFilter === 'ignored') return b.ignored
+              if (bankFilter === 'overpaid') return b.overpaid
+              return true
+            })
+            const counts = {
+              total: bankTxs.length,
+              unmatched: bankTxs.filter((b) => !b.matched && !b.ignored).length,
+              matched: bankTxs.filter((b) => b.matched).length,
+              ignored: bankTxs.filter((b) => b.ignored).length,
+              overpaid: bankTxs.filter((b) => b.overpaid).length,
+            }
+            const payableTxs = transactions.filter((t) => t.status === 'created' || t.status === 'partial_paid')
+
+            return (
+              <section className="panel">
+                <h2>💰 Bankovní pohyby</h2>
+                <p className="muted">Příchozí platby z FIO banky. Nespárované platby přiřaď ručně k transakci nebo označ jako ignorované.</p>
+
+                <section className="statsGrid">
+                  <StatCard label="Celkem" value={String(counts.total)} tone="neutral" />
+                  <StatCard label="Nespárované" value={String(counts.unmatched)} tone={counts.unmatched > 0 ? 'danger' : 'neutral'} />
+                  <StatCard label="Spárované" value={String(counts.matched)} tone="success" />
+                  <StatCard label="Ignorované" value={String(counts.ignored)} tone="neutral" />
+                  <StatCard label="Přeplatky" value={String(counts.overpaid)} tone={counts.overpaid > 0 ? 'danger' : 'neutral'} />
+                </section>
+
+                <div className="filterRow" style={{ marginBottom: 12 }}>
+                  {(['all', 'unmatched', 'matched', 'ignored', 'overpaid'] as BankFilter[]).map((f) => (
+                    <button key={f} className={bankFilter === f ? 'btn btnPrimary' : 'btn btnSecondary'} onClick={() => setBankFilter(f)}>
+                      {{ all: 'Vše', unmatched: 'Nespárované', matched: 'Spárované', ignored: 'Ignorované', overpaid: 'Přeplatky' }[f]}
+                    </button>
+                  ))}
+                </div>
+
+                {filtered.length === 0 ? (
+                  <p className="muted">Žádné pohyby v tomto filtru.</p>
+                ) : (
+                  <div className="tableWrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Datum</th>
+                          <th>Částka</th>
+                          <th>VS</th>
+                          <th>Protiúčet</th>
+                          <th>Zpráva</th>
+                          <th>Stav</th>
+                          <th>Transakce</th>
+                          <th>Akce</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((b) => (
+                          <tr key={b.id}>
+                            <td>{b.date ? formatDate(b.date) : '-'}</td>
+                            <td style={{ fontWeight: 600 }}>{formatPrice(b.amount)}</td>
+                            <td><code>{b.variableSymbol || '-'}</code></td>
+                            <td style={{ fontSize: '0.85em' }}>{b.counterAccount || '-'}</td>
+                            <td style={{ fontSize: '0.85em', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.message || '-'}</td>
+                            <td>
+                              {b.ignored && <span className="badge" style={{ background: '#6b7280' }}>Ignorováno</span>}
+                              {b.matched && !b.overpaid && <span className="badge" style={{ background: '#22c55e' }}>Spárováno</span>}
+                              {b.overpaid && <span className="badge" style={{ background: '#ef4444' }}>⚠️ Přeplatek</span>}
+                              {!b.matched && !b.ignored && <span className="badge" style={{ background: '#f59e0b' }}>Nespárováno</span>}
+                            </td>
+                            <td>
+                              {b.matchedTransactionCode ? <code>{b.matchedTransactionCode}</code> : '-'}
+                              {b.ignored && b.ignoredReason ? <small style={{ display: 'block', color: '#9ca3af' }}>{b.ignoredReason}</small> : null}
+                            </td>
+                            <td>
+                              {!b.matched && !b.ignored && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <select
+                                      value={bankMatchTxId[b.bankTxId] || ''}
+                                      onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}
+                                      style={{ flex: 1, fontSize: '0.85em' }}
+                                    >
+                                      <option value="">Přiřadit k…</option>
+                                      {payableTxs.map((tx) => (
+                                        <option key={tx.id} value={tx.id}>
+                                          {tx.transactionCode} · {formatPrice(tx.amountCzk)} · {tx.buyerName}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      className="btn btnPrimary"
+                                      style={{ fontSize: '0.8em', padding: '2px 8px' }}
+                                      disabled={bankBusy || !bankMatchTxId[b.bankTxId]}
+                                      onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}
+                                    >
+                                      ✓
+                                    </button>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <input
+                                      value={bankIgnoreReason[b.bankTxId] || ''}
+                                      onChange={(e) => setBankIgnoreReason((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}
+                                      placeholder="Důvod ignorování…"
+                                      style={{ flex: 1, fontSize: '0.85em' }}
+                                    />
+                                    <button
+                                      className="btn btnSecondary"
+                                      style={{ fontSize: '0.8em', padding: '2px 8px' }}
+                                      disabled={bankBusy}
+                                      onClick={() => void ignoreBankPayment(b.bankTxId, bankIgnoreReason[b.bankTxId] || '')}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )
+          })()}
         </>
       )}
 
