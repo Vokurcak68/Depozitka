@@ -324,7 +324,7 @@ function App() {
       setUserRole(resolveUserRole(roleData))
     }
 
-    // Bootstrap stavu po F5 — nespoléhat jen na event callback.
+    // Bootstrap stavu po F5 - nespoléhat jen na event callback.
     void supabase.auth.getSession().then(({ data, error }) => {
       if (error) return
       void applySessionState(data.session as any)
@@ -348,28 +348,38 @@ function App() {
     setFlash({ type, text })
   }
 
-  async function triggerEngineEmailProcessing(): Promise<{ ok: boolean; detail?: string }> {
+  /**
+   * Send a single email immediately via engine /api/send-email (no queue).
+   */
+  async function sendEmailDirect(transactionId: string, templateKey: string, toEmail: string): Promise<{ ok: boolean; error?: string }> {
     const base = (import.meta.env.VITE_ENGINE_URL || '').trim()
-    const path = (import.meta.env.VITE_ENGINE_PROCESS_EMAILS_PATH || '/api/cron/process-emails').trim()
     const token = (import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()
 
     if (!base || !token) {
-      return { ok: false, detail: 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.' }
+      return { ok: false, error: 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.' }
     }
 
-    const url = `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+    const url = `${base.replace(/\/$/, '')}/api/send-email`
 
     try {
-      const res = await fetch(`${url}?token=${encodeURIComponent(token)}`, { method: 'GET' })
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        return { ok: false, detail: `Engine trigger ${res.status}${body ? `: ${body.slice(0, 120)}` : ''}` }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction_id: transactionId, template_key: templateKey, to_email: toEmail, token }),
+      })
+
+      const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))
+
+      if (!res.ok || !data.ok) {
+        return { ok: false, error: data.error || `HTTP ${res.status}` }
       }
       return { ok: true }
     } catch (err) {
-      return { ok: false, detail: err instanceof Error ? err.message : String(err) }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
+
+
 
   async function signIn(): Promise<void> {
     if (!sessionEmail || !password) {
@@ -524,7 +534,7 @@ function App() {
       })))
     }
 
-    // load api keys (non-critical — table may not exist yet)
+    // load api keys (non-critical - table may not exist yet)
     try {
       const akRes = await supabase
         .from('dpt_api_keys')
@@ -603,7 +613,7 @@ function App() {
 
       setGeneratedKey(rawKey)
       setApiKeyForm({ ...emptyApiKeyForm })
-      notify('success', 'API klíč vygenerován. Zkopíruj ho — nebude znovu zobrazen!')
+      notify('success', 'API klíč vygenerován. Zkopíruj ho - nebude znovu zobrazen!')
       await reloadAll()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -743,10 +753,28 @@ function App() {
     notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
 
-    // DB trigger auto-queued emails for the new status → kick engine to send them now
-    triggerEngineEmailProcessing().then((r) => {
-      if (!r.ok) console.warn('[Depozitka] Engine email trigger after status change failed:', r.detail)
-    })
+    // Send emails immediately for the new status (no queue)
+    const updatedTx: Transaction = { ...tx, status: targetStatus }
+    const targets = getEmailTargetsForStatus(updatedTx, sessionEmail)
+
+    if (targets.length > 0) {
+      let sent = 0
+      let failed = 0
+      for (const target of targets) {
+        const result = await sendEmailDirect(tx.id, target.templateKey, target.toEmail)
+        if (result.ok) sent++
+        else {
+          failed++
+          console.warn(`[Depozitka] Email send failed (${target.templateKey} → ${target.toEmail}):`, result.error)
+        }
+      }
+
+      if (failed > 0) {
+        notify('error', `Odesláno ${sent}/${targets.length} emailů. ${failed} selhalo.`)
+      } else if (sent > 0) {
+        notify('success', `Stav změněn + ${sent} email${sent > 1 ? 'ů' : ''} odesláno.`)
+      }
+    }
   }
 
   async function requestStatusChange(tx: Transaction): Promise<void> {
@@ -772,36 +800,32 @@ function App() {
     const targets = getEmailTargetsForStatus(tx, sessionEmail)
 
     if (!targets.length) {
-      notify('error', 'Pro stav „' + statusLabel[tx.status] + '“ není dostupná email šablona.')
+      notify('error', 'Pro stav "' + statusLabel[tx.status] + '" není dostupná email šablona.')
       return
     }
 
     setManualEmailBusy((prev) => ({ ...prev, [tx.id]: true }))
 
+    let sent = 0
+    let failed = 0
     for (const target of targets) {
-      const { error } = await supabase.rpc('dpt_queue_email', {
-        p_transaction_id: tx.id,
-        p_template_key: target.templateKey,
-        p_to_email: target.toEmail,
-        p_note: 'Manual resend from UI · status=' + tx.status,
-      })
-
-      if (error) {
-        setManualEmailBusy((prev) => ({ ...prev, [tx.id]: false }))
-        notify('error', 'Queue email selhalo: ' + error.message)
-        return
+      const result = await sendEmailDirect(tx.id, target.templateKey, target.toEmail)
+      if (result.ok) {
+        sent++
+      } else {
+        failed++
+        console.warn(`[Depozitka] Direct email failed (${target.templateKey} → ${target.toEmail}):`, result.error)
       }
     }
 
-    const trigger = await triggerEngineEmailProcessing()
-    console.log('[Depozitka] Engine trigger result:', JSON.stringify(trigger))
-
     setManualEmailBusy((prev) => ({ ...prev, [tx.id]: false }))
 
-    if (trigger.ok) {
-      notify('success', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×) a engine je hned zpracoval.')
+    if (failed > 0 && sent === 0) {
+      notify('error', `Odeslání emailů selhalo (${failed}×). Zkontroluj engine konfiguraci.`)
+    } else if (failed > 0) {
+      notify('error', `Odesláno ${sent}/${targets.length} emailů. ${failed} selhalo.`)
     } else {
-      notify('error', 'Emaily pro stav „' + statusLabel[tx.status] + '“ zařazeny do fronty (' + targets.length + '×). Engine trigger selhal: ' + (trigger.detail || 'neznámá chyba'))
+      notify('success', `${sent} email${sent > 1 ? 'ů' : ''} pro stav "${statusLabel[tx.status]}" odesláno ihned.`)
     }
 
     await reloadAll()
@@ -929,7 +953,7 @@ function App() {
             </label>
           </div>
           <button className="btn btnPrimary" disabled={busy} onClick={() => void signIn()}>
-            {busy ? 'Přihlašuji…' : 'Přihlásit'}
+            {busy ? 'Přihlašuji...' : 'Přihlásit'}
           </button>
         </section>
       ) : (
@@ -1037,7 +1061,7 @@ function App() {
                       </label>
                     </div>
                     <button className="btn btnPrimary" onClick={() => void createTransaction()} disabled={busy}>
-                      {busy ? 'Vytvářím…' : 'Vytvořit transakci'}
+                      {busy ? 'Vytvářím...' : 'Vytvořit transakci'}
                     </button>
                   </div>
                 </section>
@@ -1048,7 +1072,7 @@ function App() {
                 <div className="filtersRow">
                   <input
                     className="searchInput"
-                    placeholder="Hledat podle tx, order ID, kupujícího nebo prodejce…"
+                    placeholder="Hledat podle tx, order ID, kupujícího nebo prodejce..."
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
                   />
@@ -1247,7 +1271,7 @@ function App() {
                   <label>Notes<textarea value={marketplaceForm.notes} onChange={(e) => setMarketplaceForm((p) => ({ ...p, notes: e.target.value }))} rows={3} /></label>
                   <div className="rowActions">
                     <button className="btn btnPrimary" onClick={() => void saveMarketplace()} disabled={marketplaceBusy}>
-                      {marketplaceBusy ? 'Ukládám…' : 'Uložit marketplace'}
+                      {marketplaceBusy ? 'Ukládám...' : 'Uložit marketplace'}
                     </button>
                     <button className="btn btnSecondary" onClick={() => { setMarketplaceCode(''); setMarketplaceForm({ ...emptyMpForm }) }}>
                       Nový záznam
@@ -1258,7 +1282,7 @@ function App() {
 
               <hr className="sectionDivider" />
 
-              <h2>API klíče {marketplaceCode ? `— ${marketplaceCode}` : ''}</h2>
+              <h2>API klíče {marketplaceCode ? `- ${marketplaceCode}` : ''}</h2>
               {!marketplaceCode && <p className="hint">Vyber marketplace vlevo pro správu klíčů.</p>}
 
               {marketplaceCode && (
@@ -1324,13 +1348,13 @@ function App() {
                   </div>
                   <div className="rowActions">
                     <button className="btn btnPrimary" onClick={() => void createApiKey()} disabled={apiKeyBusy}>
-                      {apiKeyBusy ? 'Generuji…' : '🔑 Vygenerovat API klíč'}
+                      {apiKeyBusy ? 'Generuji...' : '🔑 Vygenerovat API klíč'}
                     </button>
                   </div>
 
                   {generatedKey && (
                     <div className="generatedKeyBox">
-                      <p><strong>⚠️ Nový klíč — zkopíruj ho teď, nebude znovu zobrazen!</strong></p>
+                      <p><strong>⚠️ Nový klíč - zkopíruj ho teď, nebude znovu zobrazen!</strong></p>
                       <code className="generatedKeyValue">{generatedKey}</code>
                       <button className="btn btnSecondary btnSm" onClick={() => { void navigator.clipboard.writeText(generatedKey); notify('success', 'Zkopírováno!') }}>
                         📋 Kopírovat
@@ -1346,7 +1370,7 @@ function App() {
           {canUseAdminTabs(userRole) && tab === 'seller-fallback' && (
             <section className="panel">
               <h2>Seller payout fallback</h2>
-              <p className="muted">Použij, když marketplace neposlal payout účet při create transaction. Po stavu „paid" je účet zamčený.</p>
+              <p className="muted">Použij, když marketplace neposlal payout účet při create transaction. Po stavu "paid" je účet zamčený.</p>
 
               <div className="formGrid">
                 <label>
@@ -1371,7 +1395,7 @@ function App() {
 
               <div className="rowActions">
                 <button className="btn btnPrimary" onClick={() => void saveSellerFallback()} disabled={sellerFallbackBusy || !sellerFallbackForm.transactionCode || !sellerFallbackForm.iban}>
-                  {sellerFallbackBusy ? 'Ukládám…' : 'Uložit payout účet'}
+                  {sellerFallbackBusy ? 'Ukládám...' : 'Uložit payout účet'}
                 </button>
               </div>
             </section>
@@ -1397,7 +1421,7 @@ function App() {
       {pendingAction && (
         <ConfirmModal
           title="Potvrzení kritické akce"
-          message={`Opravdu chceš změnit stav ${pendingAction.tx.transactionCode} na „${statusLabel[pendingAction.targetStatus]}“?`}
+          message={`Opravdu chceš změnit stav ${pendingAction.tx.transactionCode} na "${statusLabel[pendingAction.targetStatus]}"?`}
           subText="Tato akce je auditovaná a může ovlivnit vyplacení peněz."
           confirmLabel="Ano, potvrdit"
           onCancel={() => setPendingAction(null)}
@@ -1558,7 +1582,7 @@ function TxCard({
             Detail
           </button>
           <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
-            {emailBusy ? 'Odesílám…' : 'Odeslat email'}
+            {emailBusy ? 'Odesílám...' : 'Odeslat email'}
           </button>
           <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
             Potvrdit změnu
@@ -1648,7 +1672,7 @@ function TxDrawer({
             <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
             <div className="txButtons">
               <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
-                {emailBusy ? 'Odesílám…' : 'Odeslat email dle stavu'}
+                {emailBusy ? 'Odesílám...' : 'Odeslat email dle stavu'}
               </button>
               <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
                 Potvrdit změnu
