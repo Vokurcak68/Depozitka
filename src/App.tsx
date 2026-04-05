@@ -742,6 +742,11 @@ function App() {
     setStatusNote((prev) => ({ ...prev, [tx.id]: '' }))
     notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
+
+    // DB trigger auto-queued emails for the new status → kick engine to send them now
+    triggerEngineEmailProcessing().then((r) => {
+      if (!r.ok) console.warn('[Depozitka] Engine email trigger after status change failed:', r.detail)
+    })
   }
 
   async function requestStatusChange(tx: Transaction): Promise<void> {
