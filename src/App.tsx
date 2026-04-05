@@ -169,11 +169,17 @@ function getEmailTargetsForStatus(tx: Transaction, adminEmail: string): { templa
 
   switch (tx.status) {
     case 'created':
-    case 'partial_paid':
       return [
         { templateKey: 'tx_created_buyer', toEmail: tx.buyerEmail },
         { templateKey: 'tx_created_seller', toEmail: tx.sellerEmail },
         ...(admin ? [{ templateKey: 'tx_created_admin', toEmail: admin }] : []),
+      ]
+
+    case 'partial_paid':
+      return [
+        { templateKey: 'partial_paid_buyer', toEmail: tx.buyerEmail },
+        { templateKey: 'partial_paid_seller', toEmail: tx.sellerEmail },
+        ...(admin ? [{ templateKey: 'partial_paid_admin', toEmail: admin }] : []),
       ]
 
     case 'paid':
