@@ -316,6 +316,8 @@ function App() {
   const [bankBusy, setBankBusy] = useState(false)
   const [bankMatchTxId, setBankMatchTxId] = useState<Record<string, string>>({})
   const [bankIgnoreReason, setBankIgnoreReason] = useState<Record<string, string>>({})
+  const [bankSyncBusy, setBankSyncBusy] = useState(false)
+  const [bankSyncResult, setBankSyncResult] = useState<string | null>(null)
 
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
@@ -676,6 +678,41 @@ function App() {
     notify('success', 'Platba označena jako ignorovaná')
     setBankIgnoreReason((prev) => ({ ...prev, [bankTxId]: '' }))
     await reloadAll()
+  }
+
+  async function triggerBankSync(): Promise<void> {
+    const base = (import.meta.env.VITE_ENGINE_URL || '').trim()
+    const token = (import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()
+
+    if (!base || !token) {
+      notify('error', 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.')
+      return
+    }
+
+    setBankSyncBusy(true)
+    setBankSyncResult(null)
+
+    try {
+      const url = `${base.replace(/\/$/, '')}/api/cron/fio-sync?token=${encodeURIComponent(token)}`
+      const res = await fetch(url)
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+
+      if (!res.ok) {
+        notify('error', `Sync selhal: ${data.error || res.status}`)
+        setBankSyncResult(`❌ ${data.error || res.status}`)
+      } else {
+        const msg = `Synchronizováno ${data.synced || 0} pohybů, spárováno ${data.matched || 0}`
+        notify('success', msg)
+        setBankSyncResult(`✅ ${msg}`)
+        await reloadAll()
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      notify('error', `Sync selhal: ${msg}`)
+      setBankSyncResult(`❌ ${msg}`)
+    } finally {
+      setBankSyncBusy(false)
+    }
   }
 
   function generateRandomKey(prefix: string): string {
@@ -1582,8 +1619,16 @@ function App() {
 
             return (
               <section className="panel">
-                <h2>💰 Bankovní pohyby</h2>
-                <p className="muted">Příchozí platby z FIO banky. Nespárované platby přiřaď ručně k transakci nebo označ jako ignorované.</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <h2 style={{ margin: 0 }}>Bankovní pohyby</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {bankSyncResult && <span style={{ fontSize: '0.82rem' }}>{bankSyncResult}</span>}
+                    <button className="btn btnPrimary" disabled={bankSyncBusy} onClick={() => void triggerBankSync()}>
+                      {bankSyncBusy ? '⏳ Načítám…' : '🔄 Načíst z banky'}
+                    </button>
+                  </div>
+                </div>
+                <p className="muted">Příchozí platby z FIO banky od 1. 4. 2026. Nespárované přiřaď ručně nebo označ jako ignorované.</p>
 
                 <section className="statsGrid">
                   <StatCard label="Celkem" value={String(counts.total)} tone="neutral" active={bankFilter === 'all'} onClick={() => setBankFilter('all')} />
