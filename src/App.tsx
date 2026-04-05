@@ -318,6 +318,7 @@ function App() {
   const [bankIgnoreReason, setBankIgnoreReason] = useState<Record<string, string>>({})
   const [bankSyncBusy, setBankSyncBusy] = useState(false)
   const [bankSyncResult, setBankSyncResult] = useState<string | null>(null)
+  const [trackingNumber, setTrackingNumber] = useState<Record<string, string>>({})
 
 
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
@@ -919,6 +920,23 @@ function App() {
       }
     }
 
+    // Save tracking number when shipping
+    if (targetStatus === 'shipped') {
+      const tn = (trackingNumber[tx.id] || '').trim()
+      if (tn) {
+        const { error: trackErr } = await supabase
+          .from('dpt_transactions')
+          .update({ shipping_tracking_number: tn })
+          .eq('id', tx.id)
+
+        if (trackErr) {
+          setBusy(false)
+          notify('error', 'Uložení tracking čísla selhalo: ' + trackErr.message)
+          return
+        }
+      }
+    }
+
     const { error } = await supabase.rpc('dpt_change_status', {
       p_transaction_code: tx.transactionCode,
       p_new_status: targetStatus,
@@ -936,6 +954,7 @@ function App() {
     setStatusChange((prev) => ({ ...prev, [tx.id]: '' }))
     setStatusNote((prev) => ({ ...prev, [tx.id]: '' }))
     setManualPaidAmount((prev) => ({ ...prev, [tx.id]: '' }))
+    setTrackingNumber((prev) => ({ ...prev, [tx.id]: '' }))
     notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
 
@@ -1305,6 +1324,8 @@ function App() {
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
+                        trackingNum={trackingNumber[tx.id] || ''}
+                        onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
                         onSendManualEmail={() => void sendManualEmailForTx(tx)}
                       />
                     ))}
@@ -1326,6 +1347,8 @@ function App() {
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
+                        trackingNum={trackingNumber[tx.id] || ''}
+                        onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
                         onSendManualEmail={() => void sendManualEmailForTx(tx)}
                       />
                     ))}
@@ -1347,6 +1370,8 @@ function App() {
                         onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
                         onApply={() => void requestStatusChange(tx)}
                         onOpenDetail={() => setSelectedTx(tx)}
+                        trackingNum={trackingNumber[tx.id] || ''}
+                        onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
                         onSendManualEmail={() => void sendManualEmailForTx(tx)}
                       />
                     ))}
@@ -1767,6 +1792,8 @@ function App() {
           paidAmount={manualPaidAmount[selectedTx.id] || ''}
           onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onApply={() => void requestStatusChange(selectedTx)}
+          trackingNum={trackingNumber[selectedTx.id] || ''}
+          onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onSendManualEmail={() => void sendManualEmailForTx(selectedTx)}
         />
       )}
@@ -1871,10 +1898,12 @@ function TxCard({
   change,
   note,
   paidAmount = '',
+  trackingNum = '',
   emailBusy = false,
   onChange,
   onNote,
   onPaidAmount,
+  onTrackingNumber,
   onApply,
   onOpenDetail,
   onSendManualEmail,
@@ -1883,10 +1912,12 @@ function TxCard({
   change: EscrowStatus | ''
   note: string
   paidAmount?: string
+  trackingNum?: string
   emailBusy?: boolean
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
   onPaidAmount?: (value: string) => void
+  onTrackingNumber?: (value: string) => void
   onApply: () => void
   onOpenDetail: () => void
   onSendManualEmail: () => void
@@ -1951,6 +1982,14 @@ function TxCard({
             style={{ borderColor: '#f59e0b' }}
           />
         )}
+        {change === 'shipped' && (
+          <input
+            value={trackingNum}
+            onChange={(e) => onTrackingNumber?.(e.target.value)}
+            placeholder="Tracking číslo zásilky"
+            style={{ borderColor: '#3b82f6' }}
+          />
+        )}
         <div className="txButtons">
           <button className="btn btnSecondary" onClick={onOpenDetail}>
             Detail
@@ -1973,11 +2012,13 @@ function TxDrawer({
   change,
   note,
   paidAmount = '',
+  trackingNum = '',
   emailBusy = false,
   onClose,
   onChange,
   onNote,
   onPaidAmount,
+  onTrackingNumber,
   onApply,
   onSendManualEmail,
 }: {
@@ -1986,11 +2027,13 @@ function TxDrawer({
   change: EscrowStatus | ''
   note: string
   paidAmount?: string
+  trackingNum?: string
   emailBusy?: boolean
   onClose: () => void
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
   onPaidAmount?: (value: string) => void
+  onTrackingNumber?: (value: string) => void
   onApply: () => void
   onSendManualEmail: () => void
 }) {
@@ -2063,6 +2106,14 @@ function TxDrawer({
                 onChange={(e) => onPaidAmount?.(e.target.value)}
                 placeholder="Již uhrazeno (Kč)"
                 style={{ borderColor: '#f59e0b' }}
+              />
+            )}
+            {change === 'shipped' && (
+              <input
+                value={trackingNum}
+                onChange={(e) => onTrackingNumber?.(e.target.value)}
+                placeholder="Tracking číslo zásilky"
+                style={{ borderColor: '#3b82f6' }}
               />
             )}
             <div className="txButtons">
