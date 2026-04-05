@@ -197,6 +197,7 @@
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0;
 }
@@ -976,17 +977,7 @@ code {
 
 /* ── Bank tab responsive ── */
 
-.bankFilters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.bankFilters .btn {
-  font-size: 0.82rem;
-  padding: 5px 12px;
-}
+/* bankFilters removed — using clickable StatCards instead */
 
 /* Desktop: show table, hide cards */
 .bankDesktop { display: block; }
@@ -1070,12 +1061,5 @@ code {
   .bankDesktop { display: none; }
   .bankMobile { display: block; }
 
-  .bankFilters {
-    gap: 4px;
-  }
 
-  .bankFilters .btn {
-    font-size: 0.75rem;
-    padding: 4px 8px;
-  }
 }

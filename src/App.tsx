@@ -1128,7 +1128,7 @@ function App() {
                     Seller payout
                   </button>
                   <button className={tab === 'bank' ? 'active' : ''} onClick={() => setTab('bank')}>
-                    💰 Banka
+                    Banka
                   </button>
                 </>
               )}
@@ -1586,20 +1586,12 @@ function App() {
                 <p className="muted">Příchozí platby z FIO banky. Nespárované platby přiřaď ručně k transakci nebo označ jako ignorované.</p>
 
                 <section className="statsGrid">
-                  <StatCard label="Celkem" value={String(counts.total)} tone="neutral" />
-                  <StatCard label="Nespárované" value={String(counts.unmatched)} tone={counts.unmatched > 0 ? 'danger' : 'neutral'} />
-                  <StatCard label="Spárované" value={String(counts.matched)} tone="success" />
-                  <StatCard label="Ignorované" value={String(counts.ignored)} tone="neutral" />
-                  <StatCard label="Přeplatky" value={String(counts.overpaid)} tone={counts.overpaid > 0 ? 'danger' : 'neutral'} />
+                  <StatCard label="Celkem" value={String(counts.total)} tone="neutral" active={bankFilter === 'all'} onClick={() => setBankFilter('all')} />
+                  <StatCard label="Nespárované" value={String(counts.unmatched)} tone={counts.unmatched > 0 ? 'danger' : 'neutral'} active={bankFilter === 'unmatched'} onClick={() => setBankFilter('unmatched')} />
+                  <StatCard label="Spárované" value={String(counts.matched)} tone="success" active={bankFilter === 'matched'} onClick={() => setBankFilter('matched')} />
+                  <StatCard label="Ignorované" value={String(counts.ignored)} tone="neutral" active={bankFilter === 'ignored'} onClick={() => setBankFilter('ignored')} />
+                  <StatCard label="Přeplatky" value={String(counts.overpaid)} tone={counts.overpaid > 0 ? 'danger' : 'neutral'} active={bankFilter === 'overpaid'} onClick={() => setBankFilter('overpaid')} />
                 </section>
-
-                <div className="bankFilters">
-                  {(['all', 'unmatched', 'matched', 'ignored', 'overpaid'] as BankFilter[]).map((f) => (
-                    <button key={f} className={bankFilter === f ? 'btn btnPrimary' : 'btn btnSecondary'} onClick={() => setBankFilter(f)}>
-                      {{ all: 'Vše', unmatched: 'Nespárované', matched: 'Spárované', ignored: 'Ignorované', overpaid: 'Přeplatky' }[f]}
-                    </button>
-                  ))}
-                </div>
 
                 {filtered.length === 0 ? (
                   <p className="muted">Žádné pohyby v tomto filtru.</p>
