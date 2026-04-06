@@ -32,7 +32,6 @@ import {
   canUseAdminTabs,
   resolveUserRole,
   formatPrice,
-  formatDate,
   isCriticalTransition,
   resolveInitialTheme,
 } from './lib/utils'
@@ -43,6 +42,10 @@ import { LandingSection, EmptyGroup } from './components/LandingSection'
 import { TxCard } from './components/TxCard'
 import { TxDrawer } from './components/TxDrawer'
 import { ConfirmModal } from './components/ConfirmModal'
+import { EmailLogTab } from './components/EmailLogTab'
+import { MarketplaceTab } from './components/MarketplaceTab'
+import { SellerFallbackTab } from './components/SellerFallbackTab'
+import { BankTab } from './components/BankTab'
 
 function App() {
   const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
@@ -1091,359 +1094,59 @@ function App() {
           )}
 
           {tab === 'emails' && (
-            <section className="panel">
-              <h2>Email logy ({emailLogs.length})</h2>
-              {emailLogsError && (
-                <p className="errorText" style={{ marginBottom: 12 }}>
-                  Načtení email logů selhalo: {emailLogsError}
-                </p>
-              )}
-              <div className="tableWrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Čas</th><th>Tx</th><th>Template</th><th>Komu</th><th>Předmět</th><th>Stav</th><th>Odesláno</th><th>Provider ID</th><th>Chyba</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {emailLogs.map((log) => (
-                      <tr key={log.id}>
-                        <td>{formatDate(log.createdAt)}</td>
-                        <td>{log.transactionCode}</td>
-                        <td>{log.templateKey}</td>
-                        <td>{log.toEmail}</td>
-                        <td>{log.subject}</td>
-                        <td>{log.status}</td>
-                        <td>{log.sentAt ? formatDate(log.sentAt) : '-'}</td>
-                        <td>{log.providerMessageId || '-'}</td>
-                        <td>{log.errorMessage || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <h3>Audit eventy ({events.length})</h3>
-              <div className="tableWrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Čas</th><th>Tx</th><th>Typ</th><th>Přechod</th><th>Poznámka</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {events.map((event) => (
-                      <tr key={event.id}>
-                        <td>{formatDate(event.createdAt)}</td>
-                        <td>{event.transactionCode}</td>
-                        <td>{event.eventType}</td>
-                        <td>{event.oldStatus || '-'} → {event.newStatus || '-'}</td>
-                        <td>{event.note || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <EmailLogTab emailLogs={emailLogs} emailLogsError={emailLogsError} events={events} />
           )}
 
           {canUseAdminTabs(userRole) && tab === 'marketplaces' && (
-            <section className="panel">
-              <h2>Evidence marketplace</h2>
-              <p className="muted">Správa napojených bazarů, settlement účtů a revshare.</p>
-
-              <div className="gridTwo">
-                <div>
-                  <h3>Seznam</h3>
-                  <div className="marketplaceList">
-                    {marketplaces.map((m) => (
-                      <button key={m.id} className={marketplaceCode === m.code ? 'active' : ''} onClick={() => onMarketplacePick(m.code)}>
-                        <strong>{m.name}</strong>
-                        <span className="muted">{m.code} · {m.feeSharePercent}%</span>
-                      </button>
-                    ))}
-                    {marketplaces.length === 0 && <p className="hint">Žádné marketplace.</p>}
-                  </div>
-                </div>
-
-                <div>
-                  <h3>{marketplaceCode ? 'Editovat' : 'Nový marketplace'}</h3>
-                  <div className="formGrid">
-                    <label>Code<input value={marketplaceForm.code} onChange={(e) => setMarketplaceForm((p) => ({ ...p, code: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} /></label>
-                    <label>Name<input value={marketplaceForm.name} onChange={(e) => setMarketplaceForm((p) => ({ ...p, name: e.target.value }))} /></label>
-                    <h4 style={{ marginBottom: '4px', color: '#6b7280', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', gridColumn: '1 / -1' }}>⚙️ Provozní údaje</h4>
-                    <label>Fee share %<input type="number" min={0} max={100} step={0.1} value={marketplaceForm.feeSharePercent} onChange={(e) => setMarketplaceForm((p) => ({ ...p, feeSharePercent: e.target.value }))} /></label>
-                    <label>Settlement account name<input value={marketplaceForm.settlementAccountName} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementAccountName: e.target.value }))} /></label>
-                    <label>Settlement IBAN<input value={marketplaceForm.settlementIban} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementIban: e.target.value }))} /></label>
-                    <label>Settlement BIC<input value={marketplaceForm.settlementBic} onChange={(e) => setMarketplaceForm((p) => ({ ...p, settlementBic: e.target.value }))} /></label>
-                  </div>
-                  <h4 style={{ marginTop: '20px', marginBottom: '8px', borderTop: '1px solid #e5e7eb', paddingTop: '16px', color: '#6b7280', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>📧 E-mail branding</h4>
-                  <div className="formGrid">
-                    <label>Logo URL<input value={marketplaceForm.logoUrl} onChange={(e) => setMarketplaceForm((p) => ({ ...p, logoUrl: e.target.value }))} placeholder="https://..." /></label>
-                    <label>Accent barva<input type="color" value={marketplaceForm.accentColor} onChange={(e) => setMarketplaceForm((p) => ({ ...p, accentColor: e.target.value }))} style={{ height: '38px' }} /></label>
-                    <label>Název firmy<input value={marketplaceForm.companyName} onChange={(e) => setMarketplaceForm((p) => ({ ...p, companyName: e.target.value }))} placeholder="Firma s.r.o." /></label>
-                    <label>Adresa firmy<input value={marketplaceForm.companyAddress} onChange={(e) => setMarketplaceForm((p) => ({ ...p, companyAddress: e.target.value }))} placeholder="Ulice 123, 110 00 Praha" /></label>
-                    <label>IČO / DIČ<input value={marketplaceForm.companyId} onChange={(e) => setMarketplaceForm((p) => ({ ...p, companyId: e.target.value }))} placeholder="12345678" /></label>
-                    <label>Kontaktní email<input type="email" value={marketplaceForm.supportEmail} onChange={(e) => setMarketplaceForm((p) => ({ ...p, supportEmail: e.target.value }))} placeholder="info@example.cz" /></label>
-                    <label>Web<input type="url" value={marketplaceForm.websiteUrl} onChange={(e) => setMarketplaceForm((p) => ({ ...p, websiteUrl: e.target.value }))} placeholder="https://example.cz" /></label>
-                  </div>
-                  <label>Notes<textarea value={marketplaceForm.notes} onChange={(e) => setMarketplaceForm((p) => ({ ...p, notes: e.target.value }))} rows={3} /></label>
-                  <div className="rowActions">
-                    <button className="btn btnPrimary" onClick={() => void saveMarketplace()} disabled={marketplaceBusy}>
-                      {marketplaceBusy ? 'Ukládám...' : 'Uložit marketplace'}
-                    </button>
-                    <button className="btn btnSecondary" onClick={() => { setMarketplaceCode(''); setMarketplaceForm({ ...emptyMpForm }) }}>
-                      Nový záznam
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <hr className="sectionDivider" />
-
-              <h2>API klíče {marketplaceCode ? `- ${marketplaceCode}` : ''}</h2>
-              {!marketplaceCode && <p className="hint">Vyber marketplace vlevo pro správu klíčů.</p>}
-
-              {marketplaceCode && (
-                <>
-                  <div className="apiKeysTable">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Prefix</th><th>Label</th><th>Scopes</th><th>Stav</th><th>Poslední použití</th><th>Expirace</th><th>Akce</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {apiKeys
-                          .filter((k) => {
-                            const mp = marketplaces.find((m) => m.code === marketplaceCode)
-                            return mp && k.marketplaceId === mp.id
-                          })
-                          .map((k) => (
-                            <tr key={k.id} className={k.revokedAt ? 'revoked' : ''}>
-                              <td><code>{k.keyPrefix}***</code></td>
-                              <td>{k.label || '-'}</td>
-                              <td className="scopesList">{k.scopes.join(', ')}</td>
-                              <td>{k.revokedAt ? '🔴 Zrušen' : k.active ? '🟢 Aktivní' : '⚪ Neaktivní'}</td>
-                              <td>{k.lastUsedAt ? formatDate(k.lastUsedAt) : 'Nikdy'}</td>
-                              <td>{k.expiresAt ? formatDate(k.expiresAt) : 'Bez expirace'}</td>
-                              <td>
-                                {!k.revokedAt && (
-                                  <button className="btn btnDanger btnSm" onClick={() => { const reason = prompt('Důvod zrušení klíče:'); if (reason !== null) void revokeApiKey(k.id, reason) }}>
-                                    Revoke
-                                  </button>
-                                )}
-                                {k.revokedAt && <span className="muted">{k.revokedReason || '-'}</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        {apiKeys.filter((k) => {
-                          const mp = marketplaces.find((m) => m.code === marketplaceCode)
-                          return mp && k.marketplaceId === mp.id
-                        }).length === 0 && (
-                          <tr><td colSpan={7} className="hint">Žádné API klíče pro tento marketplace.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <h3>Vygenerovat nový klíč</h3>
-                  <div className="formGrid">
-                    <label>Label<input value={apiKeyForm.label} onChange={(e) => setApiKeyForm((p) => ({ ...p, label: e.target.value }))} placeholder="Production key" /></label>
-                    <label>Scopes (čárkou)<input value={apiKeyForm.scopes} onChange={(e) => setApiKeyForm((p) => ({ ...p, scopes: e.target.value }))} /></label>
-                    <label>Expirace (dny, prázdné = bez)<input type="number" min={1} value={apiKeyForm.expiresInDays} onChange={(e) => setApiKeyForm((p) => ({ ...p, expiresInDays: e.target.value }))} /></label>
-                  </div>
-                  <div className="rowActions">
-                    <button className="btn btnPrimary" onClick={() => void createApiKey()} disabled={apiKeyBusy}>
-                      {apiKeyBusy ? 'Generuji...' : '🔑 Vygenerovat API klíč'}
-                    </button>
-                  </div>
-
-                  {generatedKey && (
-                    <div className="generatedKeyBox">
-                      <p><strong>⚠️ Nový klíč - zkopíruj ho teď, nebude znovu zobrazen!</strong></p>
-                      <code className="generatedKeyValue">{generatedKey}</code>
-                      <button className="btn btnSecondary btnSm" onClick={() => { void navigator.clipboard.writeText(generatedKey); notify('success', 'Zkopírováno!') }}>📋 Kopírovat</button>
-                      <button className="btn btnGhost btnSm" onClick={() => setGeneratedKey(null)}>Zavřít</button>
-                    </div>
-                  )}
-                </>
-              )}
-            </section>
+            <MarketplaceTab
+              marketplaces={marketplaces}
+              marketplaceCode={marketplaceCode}
+              marketplaceForm={marketplaceForm}
+              marketplaceBusy={marketplaceBusy}
+              apiKeys={apiKeys}
+              apiKeyForm={apiKeyForm}
+              apiKeyBusy={apiKeyBusy}
+              generatedKey={generatedKey}
+              onMarketplacePick={onMarketplacePick}
+              onMarketplaceFormChange={setMarketplaceForm}
+              onMarketplaceCodeChange={setMarketplaceCode}
+              onSaveMarketplace={() => void saveMarketplace()}
+              onApiKeyFormChange={setApiKeyForm}
+              onCreateApiKey={() => void createApiKey()}
+              onRevokeApiKey={(id, reason) => void revokeApiKey(id, reason)}
+              onGeneratedKeyChange={setGeneratedKey}
+              notify={notify}
+            />
           )}
 
           {canUseAdminTabs(userRole) && tab === 'seller-fallback' && (
-            <section className="panel">
-              <h2>Seller payout fallback</h2>
-              <p className="muted">Použij, když marketplace neposlal payout účet při create transaction. Po stavu "paid" je účet zamčený.</p>
-
-              <div className="formGrid">
-                <label>
-                  Transakce
-                  <select value={sellerFallbackForm.transactionCode} onChange={(e) => {
-                    const code = e.target.value
-                    const tx = transactions.find((t) => t.transactionCode === code)
-                    setSellerFallbackForm(tx ? { transactionCode: tx.transactionCode, iban: tx.sellerPayoutIban, accountName: tx.sellerPayoutAccountName, bic: tx.sellerPayoutBic } : { ...emptySpForm, transactionCode: code })
-                  }}>
-                    <option value="">Vyber transakci</option>
-                    {transactions.map((tx) => (
-                      <option key={tx.id} value={tx.transactionCode}>
-                        {tx.transactionCode} · {tx.sellerName} · {statusLabel[tx.status]} {tx.sellerPayoutLockedAt ? '🔒' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>IBAN<input value={sellerFallbackForm.iban} onChange={(e) => setSellerFallbackForm((p) => ({ ...p, iban: e.target.value }))} /></label>
-                <label>Account name<input value={sellerFallbackForm.accountName} onChange={(e) => setSellerFallbackForm((p) => ({ ...p, accountName: e.target.value }))} /></label>
-                <label>BIC<input value={sellerFallbackForm.bic} onChange={(e) => setSellerFallbackForm((p) => ({ ...p, bic: e.target.value }))} /></label>
-              </div>
-
-              <div className="rowActions">
-                <button className="btn btnPrimary" onClick={() => void saveSellerFallback()} disabled={sellerFallbackBusy || !sellerFallbackForm.transactionCode || !sellerFallbackForm.iban}>
-                  {sellerFallbackBusy ? 'Ukládám...' : 'Uložit payout účet'}
-                </button>
-              </div>
-            </section>
+            <SellerFallbackTab
+              transactions={transactions}
+              form={sellerFallbackForm}
+              busy={sellerFallbackBusy}
+              onFormChange={setSellerFallbackForm}
+              onSave={() => void saveSellerFallback()}
+            />
           )}
 
-          {canUseAdminTabs(userRole) && tab === 'bank' && (() => {
-            const filtered = bankTxs.filter((b) => {
-              if (bankFilter === 'unmatched') return !b.matched && !b.ignored
-              if (bankFilter === 'matched') return b.matched
-              if (bankFilter === 'ignored') return b.ignored
-              if (bankFilter === 'overpaid') return b.overpaid
-              return true
-            })
-            const counts = {
-              total: bankTxs.length,
-              unmatched: bankTxs.filter((b) => !b.matched && !b.ignored).length,
-              matched: bankTxs.filter((b) => b.matched).length,
-              ignored: bankTxs.filter((b) => b.ignored).length,
-              overpaid: bankTxs.filter((b) => b.overpaid).length,
-            }
-            const payableTxs = transactions.filter((t) => t.status === 'created' || t.status === 'partial_paid')
-
-            return (
-              <section className="panel">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                  <h2 style={{ margin: 0 }}>Bankovní pohyby</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {bankSyncResult && <span style={{ fontSize: '0.82rem' }}>{bankSyncResult}</span>}
-                    <button className="btn btnPrimary" disabled={bankSyncBusy} onClick={() => void triggerBankSync()}>
-                      {bankSyncBusy ? '⏳ Načítám…' : '🔄 Načíst z banky'}
-                    </button>
-                  </div>
-                </div>
-                <p className="muted">Příchozí platby z FIO banky od 1. 4. 2026. Nespárované přiřaď ručně nebo označ jako ignorované.</p>
-
-                <section className="statsGrid">
-                  <StatCard label="Celkem" value={String(counts.total)} tone="neutral" active={bankFilter === 'all'} onClick={() => setBankFilter('all')} />
-                  <StatCard label="Nespárované" value={String(counts.unmatched)} tone={counts.unmatched > 0 ? 'danger' : 'neutral'} active={bankFilter === 'unmatched'} onClick={() => setBankFilter('unmatched')} />
-                  <StatCard label="Spárované" value={String(counts.matched)} tone="success" active={bankFilter === 'matched'} onClick={() => setBankFilter('matched')} />
-                  <StatCard label="Ignorované" value={String(counts.ignored)} tone="neutral" active={bankFilter === 'ignored'} onClick={() => setBankFilter('ignored')} />
-                  <StatCard label="Přeplatky" value={String(counts.overpaid)} tone={counts.overpaid > 0 ? 'danger' : 'neutral'} active={bankFilter === 'overpaid'} onClick={() => setBankFilter('overpaid')} />
-                </section>
-
-                {filtered.length === 0 ? (
-                  <p className="muted">Žádné pohyby v tomto filtru.</p>
-                ) : (
-                  <>
-                    {/* Desktop table */}
-                    <div className="bankDesktop">
-                      <div className="tableWrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Datum</th><th>Částka</th><th>VS</th><th>Protiúčet</th><th>Zpráva</th><th>Stav</th><th>Transakce</th><th>Akce</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filtered.map((b) => (
-                              <tr key={b.id}>
-                                <td>{b.date ? formatDate(b.date) : '-'}</td>
-                                <td style={{ fontWeight: 600 }}>{formatPrice(b.amount)}</td>
-                                <td><code>{b.variableSymbol || '-'}</code></td>
-                                <td style={{ fontSize: '0.85em' }}>{b.counterAccount || '-'}</td>
-                                <td style={{ fontSize: '0.85em', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.message || '-'}</td>
-                                <td>
-                                  {b.ignored && <span className="badge" style={{ background: '#6b7280' }}>Ignorováno</span>}
-                                  {b.matched && !b.overpaid && <span className="badge" style={{ background: '#22c55e' }}>Spárováno</span>}
-                                  {b.overpaid && <span className="badge" style={{ background: '#ef4444' }}>⚠️ Přeplatek</span>}
-                                  {!b.matched && !b.ignored && <span className="badge" style={{ background: '#f59e0b' }}>Nespárováno</span>}
-                                </td>
-                                <td>
-                                  {b.matchedTransactionCode ? <code>{b.matchedTransactionCode}</code> : '-'}
-                                  {b.ignored && b.ignoredReason ? <small style={{ display: 'block', color: '#9ca3af' }}>{b.ignoredReason}</small> : null}
-                                </td>
-                                <td>
-                                  {!b.matched && !b.ignored && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
-                                      <div style={{ display: 'flex', gap: 4 }}>
-                                        <select value={bankMatchTxId[b.bankTxId] || ''} onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))} style={{ flex: 1, fontSize: '0.85em' }}>
-                                          <option value="">Přiřadit k…</option>
-                                          {payableTxs.map((tx) => (
-                                            <option key={tx.id} value={tx.id}>{tx.transactionCode} · {formatPrice(tx.amountCzk)} · {tx.buyerName}</option>
-                                          ))}
-                                        </select>
-                                        <button className="btn btnPrimary" style={{ fontSize: '0.8em', padding: '2px 8px' }} disabled={bankBusy || !bankMatchTxId[b.bankTxId]} onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}>✓</button>
-                                      </div>
-                                      <div style={{ display: 'flex', gap: 4 }}>
-                                        <input value={bankIgnoreReason[b.bankTxId] || ''} onChange={(e) => setBankIgnoreReason((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))} placeholder="Důvod ignorování…" style={{ flex: 1, fontSize: '0.85em' }} />
-                                        <button className="btn btnSecondary" style={{ fontSize: '0.8em', padding: '2px 8px' }} disabled={bankBusy} onClick={() => void ignoreBankPayment(b.bankTxId, bankIgnoreReason[b.bankTxId] || '')}>✕</button>
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* Mobile cards */}
-                    <div className="bankMobile">
-                      {filtered.map((b) => (
-                        <div key={b.id} className="bankCard">
-                          <div className="bankCardHeader">
-                            <span className="bankCardAmount">{formatPrice(b.amount)}</span>
-                            {b.ignored && <span className="badge" style={{ background: '#6b7280' }}>Ignorováno</span>}
-                            {b.matched && !b.overpaid && <span className="badge" style={{ background: '#22c55e' }}>Spárováno</span>}
-                            {b.overpaid && <span className="badge" style={{ background: '#ef4444' }}>⚠️ Přeplatek</span>}
-                            {!b.matched && !b.ignored && <span className="badge" style={{ background: '#f59e0b' }}>Nespárováno</span>}
-                          </div>
-                          <div className="bankCardMeta">
-                            <span>{b.date ? formatDate(b.date) : '-'}</span>
-                            <span>VS: <code>{b.variableSymbol || '-'}</code></span>
-                          </div>
-                          {b.counterAccount && <div className="bankCardDetail">Protiúčet: {b.counterAccount}</div>}
-                          {b.message && <div className="bankCardDetail">{b.message}</div>}
-                          {b.matchedTransactionCode && <div className="bankCardDetail">Transakce: <code>{b.matchedTransactionCode}</code></div>}
-                          {b.ignored && b.ignoredReason && <div className="bankCardDetail" style={{ color: '#9ca3af' }}>Důvod: {b.ignoredReason}</div>}
-
-                          {!b.matched && !b.ignored && (
-                            <div className="bankCardActions">
-                              <select value={bankMatchTxId[b.bankTxId] || ''} onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}>
-                                <option value="">Přiřadit k transakci…</option>
-                                {payableTxs.map((tx) => (
-                                  <option key={tx.id} value={tx.id}>{tx.transactionCode} · {formatPrice(tx.amountCzk)}</option>
-                                ))}
-                              </select>
-                              <button className="btn btnPrimary" disabled={bankBusy || !bankMatchTxId[b.bankTxId]} onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}>Přiřadit</button>
-                              <div className="bankCardIgnore">
-                                <input value={bankIgnoreReason[b.bankTxId] || ''} onChange={(e) => setBankIgnoreReason((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))} placeholder="Důvod…" />
-                                <button className="btn btnSecondary" disabled={bankBusy} onClick={() => void ignoreBankPayment(b.bankTxId, bankIgnoreReason[b.bankTxId] || '')}>Ignorovat</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </section>
-            )
-          })()}
+          {canUseAdminTabs(userRole) && tab === 'bank' && (
+            <BankTab
+              bankTxs={bankTxs}
+              bankFilter={bankFilter}
+              bankBusy={bankBusy}
+              bankMatchTxId={bankMatchTxId}
+              bankIgnoreReason={bankIgnoreReason}
+              bankSyncBusy={bankSyncBusy}
+              bankSyncResult={bankSyncResult}
+              transactions={transactions}
+              onBankFilterChange={setBankFilter}
+              onBankMatchTxIdChange={(bankTxId, txId) => setBankMatchTxId((prev) => ({ ...prev, [bankTxId]: txId }))}
+              onBankIgnoreReasonChange={(bankTxId, reason) => setBankIgnoreReason((prev) => ({ ...prev, [bankTxId]: reason }))}
+              onManualMatch={(bankTxId, txId) => void manualMatchPayment(bankTxId, txId)}
+              onIgnore={(bankTxId, reason) => void ignoreBankPayment(bankTxId, reason)}
+              onTriggerSync={() => void triggerBankSync()}
+            />
+          )}
         </>
       )}
 
