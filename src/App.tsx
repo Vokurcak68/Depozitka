@@ -650,8 +650,10 @@ function App() {
       return
     }
 
+    const orderIdToMatch = externalOrderId
+
     setBusy(true)
-    const { data: newTx, error } = await supabase.rpc('dpt_create_transaction', {
+    const { error } = await supabase.rpc('dpt_create_transaction', {
       p_marketplace_code: 'depozitka-test-bazar',
       p_external_order_id: externalOrderId,
       p_listing_id: null,
@@ -678,61 +680,43 @@ function App() {
       return
     }
 
-    notify('success', 'Transakce byla založena.')
     setShowCreateForm(false)
     await reloadAll()
 
-    // Auto-send created emails
+    // Find the newly created tx in reloaded state and send emails (same as the button)
+    // reloadAll() is async and sets state, but we need the tx now — query directly
+    const { data: rows } = await supabase
+      .from('dpt_transactions')
+      .select('id, transaction_code, buyer_name, buyer_email, seller_name, seller_email, amount_czk, status')
+      .eq('external_order_id', orderIdToMatch)
+      .eq('status', 'created')
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    const newTx = rows?.[0]
     if (newTx) {
-      const txRow = newTx as any
-      const createdTx: Transaction = {
-        id: txRow.id,
-        transactionCode: txRow.transaction_code,
-        marketplaceCode: 'depozitka-test-bazar',
+      // Reuse the same function the button uses
+      const fakeTx: Transaction = {
+        id: newTx.id,
+        transactionCode: newTx.transaction_code,
+        marketplaceCode: '',
         marketplaceName: '',
-        externalOrderId: txRow.external_order_id,
-        buyerName: txRow.buyer_name,
-        buyerEmail: txRow.buyer_email,
-        sellerName: txRow.seller_name,
-        sellerEmail: txRow.seller_email,
-        sellerPayoutIban: txRow.seller_payout_iban || '',
-        sellerPayoutAccountName: txRow.seller_payout_account_name || '',
-        sellerPayoutBic: txRow.seller_payout_bic || '',
-        sellerPayoutSource: txRow.seller_payout_source || '',
-        sellerPayoutLockedAt: txRow.seller_payout_locked_at || '',
-        amountCzk: Number(txRow.amount_czk),
-        feeAmountCzk: Number(txRow.fee_amount_czk),
-        payoutAmountCzk: Number(txRow.payout_amount_czk),
-        paidAmountCzk: 0,
-        paymentReference: txRow.payment_reference || '',
-        status: 'created',
-        updatedAt: txRow.updated_at || '',
-        shippingCarrier: '',
-        shippingTrackingNumber: '',
-        shieldtrackShipmentId: '',
-        stScore: null,
-        stStatus: null,
+        externalOrderId: orderIdToMatch,
+        buyerName: newTx.buyer_name,
+        buyerEmail: newTx.buyer_email,
+        sellerName: newTx.seller_name,
+        sellerEmail: newTx.seller_email,
+        sellerPayoutIban: '', sellerPayoutAccountName: '', sellerPayoutBic: '',
+        sellerPayoutSource: '', sellerPayoutLockedAt: '',
+        amountCzk: Number(newTx.amount_czk), feeAmountCzk: 0, payoutAmountCzk: 0,
+        paidAmountCzk: 0, paymentReference: '',
+        status: 'created', updatedAt: '',
+        shippingCarrier: '', shippingTrackingNumber: '',
+        shieldtrackShipmentId: '', stScore: null, stStatus: null,
       }
-
-      const targets = getEmailTargetsForStatus(createdTx, sessionEmail)
-      let sent = 0
-      let failed = 0
-      let lastError = ''
-      for (const target of targets) {
-        const result = await sendEmailDirect(createdTx.id, target.templateKey, target.toEmail)
-        if (result.ok) sent++
-        else {
-          failed++
-          lastError = result.error || 'Neznámá chyba'
-          console.warn(`[Depozitka] Auto-email failed (${target.templateKey} → ${target.toEmail}):`, result.error)
-        }
-      }
-
-      if (failed > 0) {
-        notify('error', `Transakce založena, ale ${failed}/${targets.length} emailů selhalo: ${lastError}`)
-      } else if (sent > 0) {
-        notify('success', `Transakce založena + ${sent} email${sent > 1 ? 'ů' : ''} odesláno.`)
-      }
+      await sendManualEmailForTx(fakeTx)
+    } else {
+      notify('success', 'Transakce založena.')
     }
   }
 
