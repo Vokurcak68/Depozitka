@@ -717,14 +717,19 @@ function App() {
       const targets = getEmailTargetsForStatus(createdTx, sessionEmail)
       let sent = 0
       let failed = 0
+      let lastError = ''
       for (const target of targets) {
         const result = await sendEmailDirect(createdTx.id, target.templateKey, target.toEmail)
         if (result.ok) sent++
-        else failed++
+        else {
+          failed++
+          lastError = result.error || 'Neznámá chyba'
+          console.warn(`[Depozitka] Auto-email failed (${target.templateKey} → ${target.toEmail}):`, result.error)
+        }
       }
 
       if (failed > 0) {
-        notify('error', `Transakce založena, ale ${failed}/${targets.length} emailů selhalo.`)
+        notify('error', `Transakce založena, ale ${failed}/${targets.length} emailů selhalo: ${lastError}`)
       } else if (sent > 0) {
         notify('success', `Transakce založena + ${sent} email${sent > 1 ? 'ů' : ''} odesláno.`)
       }
