@@ -11,6 +11,7 @@ export function TxDrawer({
   paidAmount = '',
   trackingNum = '',
   emailBusy = false,
+  payoutBusy = false,
   onClose,
   onChange,
   onNote,
@@ -18,6 +19,7 @@ export function TxDrawer({
   onTrackingNumber,
   onApply,
   onSendManualEmail,
+  onPayout,
 }: {
   tx: Transaction
   events: TxEvent[]
@@ -26,6 +28,7 @@ export function TxDrawer({
   paidAmount?: string
   trackingNum?: string
   emailBusy?: boolean
+  payoutBusy?: boolean
   onClose: () => void
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
@@ -33,6 +36,7 @@ export function TxDrawer({
   onTrackingNumber?: (value: string) => void
   onApply: () => void
   onSendManualEmail: () => void
+  onPayout?: () => void
 }) {
   const nextOptions = allowedTransitions[tx.status]
 
@@ -163,6 +167,31 @@ export function TxDrawer({
             </div>
           </div>
         </div>
+
+        {(tx.status === 'completed' || tx.status === 'auto_completed') && tx.sellerPayoutIban && onPayout && (
+          <div className="drawerSection">
+            <h4>💸 Výplata prodávajícímu</h4>
+            <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '10px', padding: '14px', marginBottom: '8px' }}>
+              <p style={{ margin: '0 0 4px', fontSize: '13px' }}>
+                <strong>IBAN:</strong> {maskIban(tx.sellerPayoutIban)}
+              </p>
+              <p style={{ margin: '0 0 4px', fontSize: '13px' }}>
+                <strong>Jméno:</strong> {tx.sellerPayoutAccountName || '—'}
+              </p>
+              <p style={{ margin: '0 0 8px', fontSize: '13px' }}>
+                <strong>Částka:</strong> {formatPrice(tx.payoutAmountCzk)}
+              </p>
+              <button
+                className="btn btnPrimary"
+                disabled={payoutBusy}
+                onClick={onPayout}
+                style={{ width: '100%', background: '#22c55e', borderColor: '#22c55e' }}
+              >
+                {payoutBusy ? '⏳ Odesílám do FIO...' : '💸 Odeslat výplatu do banky'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="drawerSection">
           <h4>Timeline ({events.length})</h4>

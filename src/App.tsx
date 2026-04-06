@@ -97,6 +97,7 @@ function App() {
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
   const [manualPaidAmount, setManualPaidAmount] = useState<Record<string, string>>({})
   const [manualEmailBusy, setManualEmailBusy] = useState<Record<string, boolean>>({})
+  const [payoutBusy, setPayoutBusy] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
 
@@ -821,6 +822,41 @@ function App() {
     await reloadAll()
   }
 
+  async function handlePayout(tx: Transaction): Promise<void> {
+    if (!confirm(`Opravdu odeslat výplatu ${tx.payoutAmountCzk} Kč na ${tx.sellerPayoutIban}?\n\nTransakce: ${tx.transactionCode}`)) return
+
+    const base = (import.meta.env.VITE_ENGINE_URL || '').trim()
+    const token = (import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()
+    if (!base || !token) {
+      notify('error', 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.')
+      return
+    }
+
+    setPayoutBusy((prev) => ({ ...prev, [tx.id]: true }))
+    try {
+      const res = await fetch(`${base.replace(/\/$/, '')}/api/payout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ transaction_id: tx.id }),
+      })
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+
+      if (!res.ok) {
+        notify('error', `Výplata selhala: ${data.error || res.status}`)
+      } else {
+        notify('success', `💸 Výplata ${data.amount} Kč odeslána na ${data.iban}`)
+        await reloadAll()
+      }
+    } catch (err) {
+      notify('error', `Výplata selhala: ${err instanceof Error ? err.message : 'Neznámá chyba'}`)
+    } finally {
+      setPayoutBusy((prev) => ({ ...prev, [tx.id]: false }))
+    }
+  }
+
   // ── Computed ─────────────────────────────────────────────
 
   const summary = useMemo(() => {
@@ -1121,6 +1157,7 @@ function App() {
           change={statusChange[selectedTx.id] || ''}
           note={statusNote[selectedTx.id] || ''}
           emailBusy={Boolean(manualEmailBusy[selectedTx.id])}
+          payoutBusy={Boolean(payoutBusy[selectedTx.id])}
           onClose={() => setSelectedTx(null)}
           onChange={(value) => setStatusChange((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onNote={(value) => setStatusNote((prev) => ({ ...prev, [selectedTx.id]: value }))}
@@ -1130,6 +1167,7 @@ function App() {
           trackingNum={trackingNumber[selectedTx.id] || ''}
           onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onSendManualEmail={() => void sendManualEmailForTx(selectedTx)}
+          onPayout={() => void handlePayout(selectedTx)}
         />
       )}
 
