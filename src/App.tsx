@@ -651,7 +651,7 @@ function App() {
     }
 
     setBusy(true)
-    const { error } = await supabase.rpc('dpt_create_transaction', {
+    const { data: newTx, error } = await supabase.rpc('dpt_create_transaction', {
       p_marketplace_code: 'depozitka-test-bazar',
       p_external_order_id: externalOrderId,
       p_listing_id: null,
@@ -681,6 +681,54 @@ function App() {
     notify('success', 'Transakce byla založena.')
     setShowCreateForm(false)
     await reloadAll()
+
+    // Auto-send created emails
+    if (newTx) {
+      const txRow = newTx as any
+      const createdTx: Transaction = {
+        id: txRow.id,
+        transactionCode: txRow.transaction_code,
+        marketplaceCode: 'depozitka-test-bazar',
+        marketplaceName: '',
+        externalOrderId: txRow.external_order_id,
+        buyerName: txRow.buyer_name,
+        buyerEmail: txRow.buyer_email,
+        sellerName: txRow.seller_name,
+        sellerEmail: txRow.seller_email,
+        sellerPayoutIban: txRow.seller_payout_iban || '',
+        sellerPayoutAccountName: txRow.seller_payout_account_name || '',
+        sellerPayoutBic: txRow.seller_payout_bic || '',
+        sellerPayoutSource: txRow.seller_payout_source || '',
+        sellerPayoutLockedAt: txRow.seller_payout_locked_at || '',
+        amountCzk: Number(txRow.amount_czk),
+        feeAmountCzk: Number(txRow.fee_amount_czk),
+        payoutAmountCzk: Number(txRow.payout_amount_czk),
+        paidAmountCzk: 0,
+        paymentReference: txRow.payment_reference || '',
+        status: 'created',
+        updatedAt: txRow.updated_at || '',
+        shippingCarrier: '',
+        shippingTrackingNumber: '',
+        shieldtrackShipmentId: '',
+        stScore: null,
+        stStatus: null,
+      }
+
+      const targets = getEmailTargetsForStatus(createdTx, sessionEmail)
+      let sent = 0
+      let failed = 0
+      for (const target of targets) {
+        const result = await sendEmailDirect(createdTx.id, target.templateKey, target.toEmail)
+        if (result.ok) sent++
+        else failed++
+      }
+
+      if (failed > 0) {
+        notify('error', `Transakce založena, ale ${failed}/${targets.length} emailů selhalo.`)
+      } else if (sent > 0) {
+        notify('success', `Transakce založena + ${sent} email${sent > 1 ? 'ů' : ''} odesláno.`)
+      }
+    }
   }
 
   // ── Status change ────────────────────────────────────────
