@@ -21,14 +21,12 @@ import type {
 import {
   statusLabel,
   quickFilterLabel,
-  allowedTransitions,
   emptyMpForm,
   emptySpForm,
   emptyApiKeyForm,
 } from './lib/constants'
 import {
   normalizeIban,
-  maskIban,
   roleLabel,
   canUseAdminTabs,
   resolveUserRole,
@@ -36,7 +34,6 @@ import {
   formatDate,
   isCriticalTransition,
   resolveInitialTheme,
-  getScoreColor,
 } from './lib/utils'
 import { getEmailTargetsForStatus, sendEmailDirect } from './lib/email-logic'
 
