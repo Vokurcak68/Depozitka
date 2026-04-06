@@ -1,283 +1,50 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import './App.css'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 
-type EscrowStatus =
-  | 'created'
-  | 'partial_paid'
-  | 'paid'
-  | 'shipped'
-  | 'delivered'
-  | 'completed'
-  | 'auto_completed'
-  | 'disputed'
-  | 'hold'
-  | 'refunded'
-  | 'cancelled'
-  | 'payout_sent'
-  | 'payout_confirmed'
+import type {
+  EscrowStatus,
+  Theme,
+  QuickFilter,
+  UserRole,
+  BankFilter,
+  Transaction,
+  TxEvent,
+  EmailLog,
+  PendingAction,
+  Marketplace,
+  MarketplaceForm,
+  SellerPayoutForm,
+  ApiKey,
+  ApiKeyCreateForm,
+  BankTransaction,
+} from './lib/types'
+import {
+  statusLabel,
+  quickFilterLabel,
+  allowedTransitions,
+  emptyMpForm,
+  emptySpForm,
+  emptyApiKeyForm,
+} from './lib/constants'
+import {
+  normalizeIban,
+  maskIban,
+  roleLabel,
+  canUseAdminTabs,
+  resolveUserRole,
+  formatPrice,
+  formatDate,
+  isCriticalTransition,
+  resolveInitialTheme,
+  getScoreColor,
+} from './lib/utils'
+import { getEmailTargetsForStatus, sendEmailDirect } from './lib/email-logic'
 
-type Theme = 'light' | 'dark'
-type QuickFilter = 'all' | 'resolve' | 'processing' | 'closed'
-type UserRole = 'admin' | 'support' | 'buyer' | 'seller' | 'service' | 'unknown'
-
-
-interface Transaction {
-  id: string
-  transactionCode: string
-  marketplaceCode: string
-  marketplaceName: string
-  externalOrderId: string
-  buyerName: string
-  buyerEmail: string
-  sellerName: string
-  sellerEmail: string
-  sellerPayoutIban: string
-  sellerPayoutAccountName: string
-  sellerPayoutBic: string
-  sellerPayoutSource: string
-  sellerPayoutLockedAt: string
-  amountCzk: number
-  feeAmountCzk: number
-  payoutAmountCzk: number
-  paidAmountCzk: number
-  paymentReference: string
-  status: EscrowStatus
-  updatedAt: string
-  shippingCarrier: string
-  shippingTrackingNumber: string
-  shieldtrackShipmentId: string
-  stScore: number | null
-  stStatus: string | null
-}
-
-interface TxEvent {
-  id: string
-  transactionCode: string
-  eventType: string
-  oldStatus?: string
-  newStatus?: string
-  note?: string
-  createdAt: string
-}
-
-interface EmailLog {
-  id: string
-  transactionCode: string
-  templateKey: string
-  toEmail: string
-  subject: string
-  status: string
-  createdAt: string
-  sentAt?: string | null
-  provider?: string | null
-  providerMessageId?: string | null
-  errorMessage?: string | null
-}
-
-interface PendingAction {
-  tx: Transaction
-  targetStatus: EscrowStatus
-  note: string
-}
-
-interface Marketplace {
-  id: string; code: string; name: string; active: boolean; feeSharePercent: number
-  settlementAccountName: string; settlementIban: string; settlementBic: string; notes: string
-  logoUrl: string; accentColor: string; companyName: string; companyAddress: string; companyId: string; supportEmail: string; websiteUrl: string
-}
-
-interface MarketplaceForm {
-  code: string; name: string; feeSharePercent: string
-  settlementAccountName: string; settlementIban: string; settlementBic: string; notes: string
-  logoUrl: string; accentColor: string; companyName: string; companyAddress: string; companyId: string; supportEmail: string; websiteUrl: string
-}
-
-interface SellerPayoutForm {
-  transactionCode: string; iban: string; accountName: string; bic: string
-}
-
-interface ApiKey {
-  id: string
-  marketplaceId: string
-  keyPrefix: string
-  scopes: string[]
-  active: boolean
-  label: string
-  lastUsedAt: string | null
-  expiresAt: string | null
-  revokedAt: string | null
-  revokedReason: string | null
-  createdAt: string
-}
-
-interface ApiKeyCreateForm {
-  label: string
-  scopes: string
-  expiresInDays: string
-}
-
-type BankFilter = 'all' | 'unmatched' | 'matched' | 'ignored' | 'overpaid'
-
-interface BankTransaction {
-  id: string
-  bankTxId: string
-  amount: number
-  variableSymbol: string | null
-  date: string
-  counterAccount: string | null
-  message: string | null
-  matched: boolean
-  matchedTransactionId: string | null
-  matchedTransactionCode: string | null
-  ignored: boolean
-  ignoredReason: string | null
-  overpaid: boolean
-}
-
-const emptyMpForm: MarketplaceForm = { code: '', name: '', feeSharePercent: '0', settlementAccountName: '', settlementIban: '', settlementBic: '', notes: '', logoUrl: '', accentColor: '#2563eb', companyName: '', companyAddress: '', companyId: '', supportEmail: '', websiteUrl: '' }
-const emptySpForm: SellerPayoutForm = { transactionCode: '', iban: '', accountName: '', bic: '' }
-const emptyApiKeyForm: ApiKeyCreateForm = { label: '', scopes: 'transactions:create,transactions:read', expiresInDays: '' }
-
-function normalizeIban(v: string): string { return v.replace(/\s+/g, '').toUpperCase() }
-function maskIban(v: string): string { const s = normalizeIban(v); if (!s) return '-'; return s.length <= 8 ? s : `${s.slice(0,4)}****${s.slice(-4)}` }
-function payoutSourceLabel(v: string): string { return ({ marketplace_api: 'Marketplace API', seller_portal: 'Seller portal', admin_override: 'Admin override' } as Record<string,string>)[v] || v || '-' }
-function roleLabel(role: UserRole): string { return ({ admin: 'Admin', support: 'Support', buyer: 'Kupující', seller: 'Prodejce', service: 'Service', unknown: 'Neznámá role' } as Record<UserRole, string>)[role] }
-function canUseAdminTabs(role: UserRole): boolean { return role === 'admin' || role === 'support' }
-function resolveUserRole(value: string | null | undefined): UserRole {
-  const v = (value || '').trim().toLowerCase()
-  if (v === 'admin' || v === 'support' || v === 'buyer' || v === 'seller' || v === 'service') return v
-  return 'unknown'
-}
-
-const quickFilterLabel: Record<QuickFilter, string> = {
-  all: 'Vše',
-  resolve: 'K řešení',
-  processing: 'V procesu',
-  closed: 'Ukončeno',
-}
-
-const statusLabel: Record<EscrowStatus, string> = {
-  created: 'Vytvořeno',
-  partial_paid: 'Částečně zaplaceno',
-  paid: 'Zaplaceno',
-  shipped: 'Odesláno',
-  delivered: 'Doručeno',
-  completed: 'Dokončeno',
-  auto_completed: 'Auto dokončeno',
-  disputed: 'Spor',
-  hold: 'Hold',
-  refunded: 'Refundováno',
-  cancelled: 'Zrušeno',
-  payout_sent: 'Výplata odeslána',
-  payout_confirmed: 'Výplata potvrzena',
-}
-
-const allowedTransitions: Record<EscrowStatus, EscrowStatus[]> = {
-  created: ['partial_paid', 'paid', 'cancelled'],
-  partial_paid: ['paid', 'cancelled'],
-  paid: ['shipped', 'disputed', 'hold', 'refunded'],
-  shipped: ['delivered', 'disputed', 'hold'],
-  delivered: ['completed', 'auto_completed', 'disputed', 'hold'],
-  disputed: ['hold', 'refunded', 'payout_sent', 'cancelled'],
-  hold: ['disputed', 'refunded', 'payout_sent', 'cancelled'],
-  payout_sent: ['payout_confirmed'],
-  completed: [],
-  auto_completed: [],
-  refunded: [],
-  cancelled: [],
-  payout_confirmed: [],
-}
-
-function getEmailTargetsForStatus(tx: Transaction, adminEmail: string): { templateKey: string; toEmail: string }[] {
-  const admin = adminEmail.trim().toLowerCase()
-
-  switch (tx.status) {
-    case 'created':
-      return [
-        { templateKey: 'tx_created_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'tx_created_seller', toEmail: tx.sellerEmail },
-        ...(admin ? [{ templateKey: 'tx_created_admin', toEmail: admin }] : []),
-      ]
-
-    case 'partial_paid':
-      return [
-        { templateKey: 'partial_paid_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'partial_paid_seller', toEmail: tx.sellerEmail },
-        ...(admin ? [{ templateKey: 'partial_paid_admin', toEmail: admin }] : []),
-      ]
-
-    case 'paid':
-      return [
-        { templateKey: 'payment_received_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'payment_received_seller', toEmail: tx.sellerEmail },
-      ]
-
-    case 'shipped':
-      return [{ templateKey: 'shipped_buyer', toEmail: tx.buyerEmail }]
-
-    case 'delivered':
-      return [
-        { templateKey: 'delivered_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'delivered_seller', toEmail: tx.sellerEmail },
-      ]
-
-    case 'completed':
-    case 'auto_completed':
-      return [
-        { templateKey: 'completed_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'completed_seller', toEmail: tx.sellerEmail },
-      ]
-
-    case 'disputed':
-      return [
-        { templateKey: 'dispute_opened_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'dispute_opened_seller', toEmail: tx.sellerEmail },
-        ...(admin ? [{ templateKey: 'dispute_opened_admin', toEmail: admin }] : []),
-      ]
-
-    case 'hold':
-      return [
-        { templateKey: 'hold_set_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'hold_set_seller', toEmail: tx.sellerEmail },
-      ]
-
-    case 'refunded':
-      return [
-        { templateKey: 'refunded_buyer', toEmail: tx.buyerEmail },
-        { templateKey: 'refunded_seller', toEmail: tx.sellerEmail },
-      ]
-
-    case 'payout_sent':
-    case 'payout_confirmed':
-      return [
-        { templateKey: 'payout_seller', toEmail: tx.sellerEmail },
-        ...(admin ? [{ templateKey: 'payout_admin', toEmail: admin }] : []),
-      ]
-
-    case 'cancelled':
-    default:
-      return []
-  }
-}
-
-function formatPrice(value: number): string {
-  return `${new Intl.NumberFormat('cs-CZ').format(value)} Kč`
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleString('cs-CZ')
-}
-
-function isCriticalTransition(target: EscrowStatus): boolean {
-  return ['refunded', 'cancelled', 'payout_sent'].includes(target)
-}
-
-function resolveInitialTheme(): Theme {
-  const saved = localStorage.getItem('depozitka-theme')
-  if (saved === 'light' || saved === 'dark') return saved
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
+import { StatCard } from './components/StatCard'
+import { LandingSection, EmptyGroup } from './components/LandingSection'
+import { TxCard } from './components/TxCard'
+import { TxDrawer } from './components/TxDrawer'
+import { ConfirmModal } from './components/ConfirmModal'
 
 function App() {
   const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
@@ -325,7 +92,6 @@ function App() {
   const [bankSyncResult, setBankSyncResult] = useState<string | null>(null)
   const [trackingNumber, setTrackingNumber] = useState<Record<string, string>>({})
 
-
   const [statusChange, setStatusChange] = useState<Record<string, EscrowStatus | ''>>({})
   const [statusNote, setStatusNote] = useState<Record<string, string>>({})
   const [manualPaidAmount, setManualPaidAmount] = useState<Record<string, string>>({})
@@ -336,6 +102,8 @@ function App() {
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | EscrowStatus>('all')
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
+
+  // ── Effects ──────────────────────────────────────────────
 
   useEffect(() => {
     localStorage.setItem('depozitka-theme', theme)
@@ -365,7 +133,6 @@ function App() {
       setUserRole(resolveUserRole(roleData))
     }
 
-    // Bootstrap stavu po F5 - nespoléhat jen na event callback.
     void supabase.auth.getSession().then(({ data, error }) => {
       if (error) return
       void applySessionState(data.session as any)
@@ -385,42 +152,211 @@ function App() {
     void reloadAll()
   }, [isAuthed])
 
+  // ── Helpers ──────────────────────────────────────────────
+
   function notify(type: 'success' | 'error', text: string): void {
     setFlash({ type, text })
   }
 
-  /**
-   * Send a single email immediately via engine /api/send-email (no queue).
-   */
-  async function sendEmailDirect(transactionId: string, templateKey: string, toEmail: string): Promise<{ ok: boolean; error?: string }> {
-    const base = (import.meta.env.VITE_ENGINE_URL || '').trim()
-    const token = (import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()
+  // ── Data loading ─────────────────────────────────────────
 
-    if (!base || !token) {
-      return { ok: false, error: 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.' }
-    }
-
-    const url = `${base.replace(/\/$/, '')}/api/send-email`
+  async function reloadAll(): Promise<void> {
+    setBusy(true)
 
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction_id: transactionId, template_key: templateKey, to_email: toEmail, token }),
+      const txRes = await supabase
+        .from('dpt_transactions')
+        .select(
+          'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, status, updated_at, shipping_carrier, shipping_tracking_number, shieldtrack_shipment_id, st_score, st_status, dpt_marketplaces(code, name)',
+        )
+        .order('created_at', { ascending: false })
+        .limit(300)
+
+      if (txRes.error) {
+        setBusy(false)
+        notify('error', `Načtení transakcí selhalo: ${txRes.error.message}`)
+        return
+      }
+
+      const txMap = new Map<string, string>()
+      const txRows: Transaction[] = (txRes.data || []).map((row) => {
+        txMap.set(row.id, row.transaction_code)
+        const marketplace = Array.isArray(row.dpt_marketplaces) ? row.dpt_marketplaces[0] : row.dpt_marketplaces
+        return {
+          id: row.id,
+          transactionCode: row.transaction_code,
+          marketplaceCode: marketplace?.code || '-',
+          marketplaceName: marketplace?.name || 'Neznámý bazar',
+          externalOrderId: row.external_order_id,
+          buyerName: row.buyer_name,
+          buyerEmail: row.buyer_email,
+          sellerName: row.seller_name,
+          sellerEmail: row.seller_email,
+          sellerPayoutIban: row.seller_payout_iban || '',
+          sellerPayoutAccountName: row.seller_payout_account_name || '',
+          sellerPayoutBic: row.seller_payout_bic || '',
+          sellerPayoutSource: row.seller_payout_source || '',
+          sellerPayoutLockedAt: row.seller_payout_locked_at || '',
+          amountCzk: Number(row.amount_czk),
+          feeAmountCzk: Number(row.fee_amount_czk),
+          payoutAmountCzk: Number(row.payout_amount_czk),
+          paidAmountCzk: Number(row.paid_amount || 0),
+          paymentReference: row.payment_reference || '',
+          status: row.status,
+          updatedAt: row.updated_at,
+          shippingCarrier: row.shipping_carrier || '',
+          shippingTrackingNumber: row.shipping_tracking_number || '',
+          shieldtrackShipmentId: row.shieldtrack_shipment_id || '',
+          stScore: row.st_score ?? null,
+          stStatus: row.st_status ?? null,
+        }
+      })
+      setTransactions(txRows)
+
+      setSelectedTx((prev) => {
+        if (!prev) return null
+        return txRows.find((t) => t.id === prev.id) || null
       })
 
-      const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))
+      const evRes = await supabase
+        .from('dpt_transaction_events')
+        .select('id, transaction_id, event_type, old_status, new_status, note, created_at')
+        .order('created_at', { ascending: false })
+        .limit(250)
 
-      if (!res.ok || !data.ok) {
-        return { ok: false, error: data.error || `HTTP ${res.status}` }
+      if (!evRes.error) {
+        setEvents(
+          (evRes.data || []).map((row) => ({
+            id: row.id,
+            transactionCode: txMap.get(row.transaction_id) || row.transaction_id,
+            eventType: row.event_type,
+            oldStatus: row.old_status,
+            newStatus: row.new_status,
+            note: row.note,
+            createdAt: row.created_at,
+          })),
+        )
       }
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+
+      const mailRes = await supabase
+        .from('dpt_email_logs')
+        .select('id, transaction_id, template_key, to_email, subject, status, created_at, sent_at, provider, provider_message_id, error_message')
+        .order('created_at', { ascending: false })
+        .limit(250)
+
+      if (!mailRes.error) {
+        setEmailLogsError(null)
+        setEmailLogs(
+          (mailRes.data || []).map((row) => ({
+            id: row.id,
+            transactionCode: txMap.get(row.transaction_id || '') || row.transaction_id || '-',
+            templateKey: row.template_key,
+            toEmail: row.to_email,
+            subject: row.subject,
+            status: row.status,
+            createdAt: row.created_at,
+            sentAt: row.sent_at,
+            provider: row.provider,
+            providerMessageId: row.provider_message_id,
+            errorMessage: row.error_message,
+          })),
+        )
+      } else {
+        setEmailLogs([])
+        setEmailLogsError(mailRes.error.message)
+      }
+
+      const mpRes = await supabase
+        .from('dpt_marketplaces')
+        .select('id, code, name, active, fee_share_percent, settlement_account_name, settlement_iban, settlement_bic, notes, logo_url, accent_color, company_name, company_address, company_id, support_email, website_url')
+        .order('name', { ascending: true })
+
+      if (!mpRes.error) {
+        setMarketplaces(
+          (mpRes.data || []).map((r: any) => ({
+            id: r.id,
+            code: r.code,
+            name: r.name,
+            active: Boolean(r.active),
+            feeSharePercent: Number(r.fee_share_percent || 0),
+            settlementAccountName: r.settlement_account_name || '',
+            settlementIban: r.settlement_iban || '',
+            settlementBic: r.settlement_bic || '',
+            notes: r.notes || '',
+            logoUrl: r.logo_url || '',
+            accentColor: r.accent_color || '#2563eb',
+            companyName: r.company_name || '',
+            companyAddress: r.company_address || '',
+            companyId: r.company_id || '',
+            supportEmail: r.support_email || '',
+            websiteUrl: r.website_url || '',
+          })),
+        )
+      }
+
+      try {
+        const akRes = await supabase
+          .from('dpt_api_keys')
+          .select('id, marketplace_id, key_prefix, scopes, active, label, last_used_at, expires_at, revoked_at, revoked_reason, created_at')
+          .order('created_at', { ascending: false })
+          .limit(100)
+
+        if (!akRes.error) {
+          setApiKeys(
+            (akRes.data || []).map((r: any) => ({
+              id: r.id,
+              marketplaceId: r.marketplace_id,
+              keyPrefix: r.key_prefix,
+              scopes: r.scopes || [],
+              active: Boolean(r.active),
+              label: r.label || '',
+              lastUsedAt: r.last_used_at || null,
+              expiresAt: r.expires_at || null,
+              revokedAt: r.revoked_at || null,
+              revokedReason: r.revoked_reason || null,
+              createdAt: r.created_at,
+            })),
+          )
+        }
+      } catch (_) {}
+
+      try {
+        const bankRes = await supabase
+          .from('dpt_bank_transactions')
+          .select('id, bank_tx_id, amount, variable_symbol, date, counter_account, message, matched, matched_transaction_id, ignored, ignored_reason, overpaid')
+          .order('date', { ascending: false })
+          .limit(500)
+
+        if (!bankRes.error) {
+          setBankTxs(
+            (bankRes.data || []).map((r: any) => ({
+              id: r.id,
+              bankTxId: r.bank_tx_id,
+              amount: Number(r.amount),
+              variableSymbol: r.variable_symbol || null,
+              date: r.date || '',
+              counterAccount: r.counter_account || null,
+              message: r.message || null,
+              matched: Boolean(r.matched),
+              matchedTransactionId: r.matched_transaction_id || null,
+              matchedTransactionCode: r.matched_transaction_id
+                ? txRows.find((t) => t.id === r.matched_transaction_id)?.transactionCode || r.matched_transaction_id
+                : null,
+              ignored: Boolean(r.ignored),
+              ignoredReason: r.ignored_reason || null,
+              overpaid: Boolean(r.overpaid),
+            })),
+          )
+        }
+      } catch (_) {}
+
+      setBusy(false)
+    } catch (_) {
+      setBusy(false)
     }
   }
 
-
+  // ── Auth ─────────────────────────────────────────────────
 
   async function signIn(): Promise<void> {
     if (!sessionEmail || !password) {
@@ -453,195 +389,7 @@ function App() {
     setUserRole('unknown')
   }
 
-  async function reloadAll(): Promise<void> {
-    setBusy(true)
-
-    try {
-    const txRes = await supabase
-      .from('dpt_transactions')
-      .select(
-        'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, status, updated_at, shipping_carrier, shipping_tracking_number, shieldtrack_shipment_id, st_score, st_status, dpt_marketplaces(code, name)',
-      )
-      .order('created_at', { ascending: false })
-      .limit(300)
-
-
-    if (txRes.error) {
-      setBusy(false)
-      notify('error', `Načtení transakcí selhalo: ${txRes.error.message}`)
-      return
-    }
-
-    const txMap = new Map<string, string>()
-    const txRows: Transaction[] = (txRes.data || []).map((row) => {
-      txMap.set(row.id, row.transaction_code)
-      const marketplace = Array.isArray(row.dpt_marketplaces) ? row.dpt_marketplaces[0] : row.dpt_marketplaces
-      return {
-        id: row.id,
-        transactionCode: row.transaction_code,
-        marketplaceCode: marketplace?.code || '-',
-        marketplaceName: marketplace?.name || 'Neznámý bazar',
-        externalOrderId: row.external_order_id,
-        buyerName: row.buyer_name,
-        buyerEmail: row.buyer_email,
-        sellerName: row.seller_name,
-        sellerEmail: row.seller_email,
-        sellerPayoutIban: row.seller_payout_iban || '',
-        sellerPayoutAccountName: row.seller_payout_account_name || '',
-        sellerPayoutBic: row.seller_payout_bic || '',
-        sellerPayoutSource: row.seller_payout_source || '',
-        sellerPayoutLockedAt: row.seller_payout_locked_at || '',
-        amountCzk: Number(row.amount_czk),
-        feeAmountCzk: Number(row.fee_amount_czk),
-        payoutAmountCzk: Number(row.payout_amount_czk),
-        paidAmountCzk: Number(row.paid_amount || 0),
-        paymentReference: row.payment_reference || '',
-        status: row.status,
-        updatedAt: row.updated_at,
-        shippingCarrier: row.shipping_carrier || '',
-        shippingTrackingNumber: row.shipping_tracking_number || '',
-        shieldtrackShipmentId: row.shieldtrack_shipment_id || '',
-        stScore: row.st_score ?? null,
-        stStatus: row.st_status ?? null,
-      }
-    })
-    setTransactions(txRows)
-
-    // Keep drawer in sync after reload
-    setSelectedTx((prev) => {
-      if (!prev) return null
-      return txRows.find((t) => t.id === prev.id) || null
-    })
-
-    const evRes = await supabase
-      .from('dpt_transaction_events')
-      .select('id, transaction_id, event_type, old_status, new_status, note, created_at')
-      .order('created_at', { ascending: false })
-      .limit(250)
-
-    if (!evRes.error) {
-      setEvents(
-        (evRes.data || []).map((row) => ({
-          id: row.id,
-          transactionCode: txMap.get(row.transaction_id) || row.transaction_id,
-          eventType: row.event_type,
-          oldStatus: row.old_status,
-          newStatus: row.new_status,
-          note: row.note,
-          createdAt: row.created_at,
-        })),
-      )
-    }
-
-    const mailRes = await supabase
-      .from('dpt_email_logs')
-      .select('id, transaction_id, template_key, to_email, subject, status, created_at, sent_at, provider, provider_message_id, error_message')
-      .order('created_at', { ascending: false })
-      .limit(250)
-
-    if (!mailRes.error) {
-      setEmailLogsError(null)
-      setEmailLogs(
-        (mailRes.data || []).map((row) => ({
-          id: row.id,
-          transactionCode: txMap.get(row.transaction_id || '') || row.transaction_id || '-',
-          templateKey: row.template_key,
-          toEmail: row.to_email,
-          subject: row.subject,
-          status: row.status,
-          createdAt: row.created_at,
-          sentAt: row.sent_at,
-          provider: row.provider,
-          providerMessageId: row.provider_message_id,
-          errorMessage: row.error_message,
-        })),
-      )
-    } else {
-      setEmailLogs([])
-      setEmailLogsError(mailRes.error.message)
-    }
-
-    // load marketplaces
-    const mpRes = await supabase
-      .from('dpt_marketplaces')
-      .select('id, code, name, active, fee_share_percent, settlement_account_name, settlement_iban, settlement_bic, notes, logo_url, accent_color, company_name, company_address, company_id, support_email, website_url')
-      .order('name', { ascending: true })
-
-    if (!mpRes.error) {
-      setMarketplaces((mpRes.data || []).map((r: any) => ({
-        id: r.id, code: r.code, name: r.name, active: Boolean(r.active),
-        feeSharePercent: Number(r.fee_share_percent || 0),
-        settlementAccountName: r.settlement_account_name || '',
-        settlementIban: r.settlement_iban || '',
-        settlementBic: r.settlement_bic || '',
-        notes: r.notes || '',
-        logoUrl: r.logo_url || '', accentColor: r.accent_color || '#2563eb',
-        companyName: r.company_name || '', companyAddress: r.company_address || '',
-        companyId: r.company_id || '', supportEmail: r.support_email || '',
-        websiteUrl: r.website_url || '',
-      })))
-    }
-
-    // load api keys (non-critical - table may not exist yet)
-    try {
-      const akRes = await supabase
-        .from('dpt_api_keys')
-        .select('id, marketplace_id, key_prefix, scopes, active, label, last_used_at, expires_at, revoked_at, revoked_reason, created_at')
-        .order('created_at', { ascending: false })
-        .limit(100)
-
-      if (!akRes.error) {
-        setApiKeys((akRes.data || []).map((r: any) => ({
-          id: r.id,
-          marketplaceId: r.marketplace_id,
-          keyPrefix: r.key_prefix,
-          scopes: r.scopes || [],
-          active: Boolean(r.active),
-          label: r.label || '',
-          lastUsedAt: r.last_used_at || null,
-          expiresAt: r.expires_at || null,
-          revokedAt: r.revoked_at || null,
-          revokedReason: r.revoked_reason || null,
-          createdAt: r.created_at,
-        })))
-      } else {
-      }
-    } catch (e) {
-    }
-
-    // load bank transactions (non-critical)
-    try {
-      const bankRes = await supabase
-        .from('dpt_bank_transactions')
-        .select('id, bank_tx_id, amount, variable_symbol, date, counter_account, message, matched, matched_transaction_id, ignored, ignored_reason, overpaid')
-        .order('date', { ascending: false })
-        .limit(500)
-
-      if (!bankRes.error) {
-        setBankTxs((bankRes.data || []).map((r: any) => ({
-          id: r.id,
-          bankTxId: r.bank_tx_id,
-          amount: Number(r.amount),
-          variableSymbol: r.variable_symbol || null,
-          date: r.date || '',
-          counterAccount: r.counter_account || null,
-          message: r.message || null,
-          matched: Boolean(r.matched),
-          matchedTransactionId: r.matched_transaction_id || null,
-          matchedTransactionCode: r.matched_transaction_id ? (txRows.find((t) => t.id === r.matched_transaction_id)?.transactionCode || r.matched_transaction_id) : null,
-          ignored: Boolean(r.ignored),
-          ignoredReason: r.ignored_reason || null,
-          overpaid: Boolean(r.overpaid),
-        })))
-      }
-    } catch (e) {
-    }
-
-    setBusy(false)
-    } catch (err) {
-      setBusy(false)
-    }
-  }
+  // ── Bank operations ──────────────────────────────────────
 
   async function manualMatchPayment(bankTxId: string, transactionId: string): Promise<void> {
     setBankBusy(true)
@@ -726,6 +474,8 @@ function App() {
     }
   }
 
+  // ── API keys ─────────────────────────────────────────────
+
   function generateRandomKey(prefix: string): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     let result = prefix
@@ -739,11 +489,17 @@ function App() {
       return
     }
     const mp = marketplaces.find((m) => m.code === marketplaceCode)
-    if (!mp) { notify('error', 'Marketplace nenalezen.'); return }
+    if (!mp) {
+      notify('error', 'Marketplace nenalezen.')
+      return
+    }
 
     const label = apiKeyForm.label.trim() || `Key for ${mp.name}`
     const scopes = apiKeyForm.scopes.split(',').map((s) => s.trim()).filter(Boolean)
-    if (scopes.length === 0) { notify('error', 'Zadej alespoň jeden scope.'); return }
+    if (scopes.length === 0) {
+      notify('error', 'Zadej alespoň jeden scope.')
+      return
+    }
 
     const expiresInDays = apiKeyForm.expiresInDays.trim() ? parseInt(apiKeyForm.expiresInDays, 10) : null
     if (expiresInDays !== null && (!Number.isFinite(expiresInDays) || expiresInDays < 1)) {
@@ -797,11 +553,28 @@ function App() {
     await reloadAll()
   }
 
-    function onMarketplacePick(code: string): void {
+  // ── Marketplace ──────────────────────────────────────────
+
+  function onMarketplacePick(code: string): void {
     setMarketplaceCode(code)
     const m = marketplaces.find((x) => x.code === code)
     if (m) {
-      setMarketplaceForm({ code: m.code, name: m.name, feeSharePercent: String(m.feeSharePercent), settlementAccountName: m.settlementAccountName, settlementIban: m.settlementIban, settlementBic: m.settlementBic, notes: m.notes, logoUrl: m.logoUrl, accentColor: m.accentColor, companyName: m.companyName, companyAddress: m.companyAddress, companyId: m.companyId, supportEmail: m.supportEmail, websiteUrl: m.websiteUrl })
+      setMarketplaceForm({
+        code: m.code,
+        name: m.name,
+        feeSharePercent: String(m.feeSharePercent),
+        settlementAccountName: m.settlementAccountName,
+        settlementIban: m.settlementIban,
+        settlementBic: m.settlementBic,
+        notes: m.notes,
+        logoUrl: m.logoUrl,
+        accentColor: m.accentColor,
+        companyName: m.companyName,
+        companyAddress: m.companyAddress,
+        companyId: m.companyId,
+        supportEmail: m.supportEmail,
+        websiteUrl: m.websiteUrl,
+      })
     } else {
       setMarketplaceForm({ ...emptyMpForm })
     }
@@ -809,34 +582,50 @@ function App() {
 
   async function saveMarketplace(): Promise<void> {
     const code = (marketplaceForm.code || marketplaceForm.name).trim().toLowerCase().replace(/[^a-z0-9-]/g, '-')
-    if (!code || !marketplaceForm.name.trim()) { notify('error', 'Code a Name jsou povinné.'); return }
+    if (!code || !marketplaceForm.name.trim()) {
+      notify('error', 'Code a Name jsou povinné.')
+      return
+    }
     setMarketplaceBusy(true)
-    const { error } = await supabase.from('dpt_marketplaces').upsert({
-      code, name: marketplaceForm.name.trim(), active: true,
-      fee_share_percent: parseFloat(marketplaceForm.feeSharePercent) || 0,
-      settlement_account_name: marketplaceForm.settlementAccountName.trim() || null,
-      settlement_iban: normalizeIban(marketplaceForm.settlementIban) || null,
-      settlement_bic: marketplaceForm.settlementBic.trim().toUpperCase() || null,
-      notes: marketplaceForm.notes.trim() || null,
-      logo_url: marketplaceForm.logoUrl.trim() || null,
-      accent_color: marketplaceForm.accentColor.trim() || '#2563eb',
-      company_name: marketplaceForm.companyName.trim() || null,
-      company_address: marketplaceForm.companyAddress.trim() || null,
-      company_id: marketplaceForm.companyId.trim() || null,
-      support_email: marketplaceForm.supportEmail.trim() || null,
-      website_url: marketplaceForm.websiteUrl.trim() || null,
-    }, { onConflict: 'code' })
+    const { error } = await supabase.from('dpt_marketplaces').upsert(
+      {
+        code,
+        name: marketplaceForm.name.trim(),
+        active: true,
+        fee_share_percent: parseFloat(marketplaceForm.feeSharePercent) || 0,
+        settlement_account_name: marketplaceForm.settlementAccountName.trim() || null,
+        settlement_iban: normalizeIban(marketplaceForm.settlementIban) || null,
+        settlement_bic: marketplaceForm.settlementBic.trim().toUpperCase() || null,
+        notes: marketplaceForm.notes.trim() || null,
+        logo_url: marketplaceForm.logoUrl.trim() || null,
+        accent_color: marketplaceForm.accentColor.trim() || '#2563eb',
+        company_name: marketplaceForm.companyName.trim() || null,
+        company_address: marketplaceForm.companyAddress.trim() || null,
+        company_id: marketplaceForm.companyId.trim() || null,
+        support_email: marketplaceForm.supportEmail.trim() || null,
+        website_url: marketplaceForm.websiteUrl.trim() || null,
+      },
+      { onConflict: 'code' },
+    )
     setMarketplaceBusy(false)
-    if (error) { notify('error', `Save marketplace: ${error.message}`); return }
+    if (error) {
+      notify('error', `Save marketplace: ${error.message}`)
+      return
+    }
     notify('success', `Marketplace "${code}" uložen.`)
     setMarketplaceCode(code)
     await reloadAll()
   }
 
+  // ── Seller fallback ──────────────────────────────────────
+
   async function saveSellerFallback(): Promise<void> {
     const txCode = sellerFallbackForm.transactionCode.trim()
     const iban = normalizeIban(sellerFallbackForm.iban)
-    if (!txCode || !iban) { notify('error', 'Transaction code a IBAN jsou povinné.'); return }
+    if (!txCode || !iban) {
+      notify('error', 'Transaction code a IBAN jsou povinné.')
+      return
+    }
     setSellerFallbackBusy(true)
     const { error } = await supabase.rpc('dpt_set_seller_payout_account', {
       p_transaction_code: txCode,
@@ -847,10 +636,15 @@ function App() {
       p_note: 'Admin override from UI',
     })
     setSellerFallbackBusy(false)
-    if (error) { notify('error', `Seller fallback: ${error.message}`); return }
+    if (error) {
+      notify('error', `Seller fallback: ${error.message}`)
+      return
+    }
     notify('success', `Payout účet pro ${txCode} uložen.`)
     await reloadAll()
   }
+
+  // ── Transaction create ───────────────────────────────────
 
   async function createTransaction(): Promise<void> {
     if (!buyerName.trim() || !buyerEmail.trim() || !sellerName.trim() || !sellerEmail.trim()) {
@@ -891,6 +685,8 @@ function App() {
     await reloadAll()
   }
 
+  // ── Status change ────────────────────────────────────────
+
   function parseManualAmount(raw: string): number | null {
     const normalized = (raw || '').replace(/\s+/g, '').replace(',', '.').trim()
     if (!normalized) return null
@@ -930,7 +726,6 @@ function App() {
       }
     }
 
-    // Save tracking number when shipping
     if (targetStatus === 'shipped') {
       const tn = (trackingNumber[tx.id] || '').trim()
       if (tn) {
@@ -968,11 +763,16 @@ function App() {
     notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
 
-    // Send emails immediately for the new status (no queue)
+    // Send emails for the new status
     const updatedTx: Transaction = {
       ...tx,
       status: targetStatus,
-      paidAmountCzk: targetStatus === 'paid' ? (manualAmount ?? tx.amountCzk) : targetStatus === 'partial_paid' ? (manualAmount ?? tx.paidAmountCzk) : tx.paidAmountCzk,
+      paidAmountCzk:
+        targetStatus === 'paid'
+          ? (manualAmount ?? tx.amountCzk)
+          : targetStatus === 'partial_paid'
+            ? (manualAmount ?? tx.paidAmountCzk)
+            : tx.paidAmountCzk,
     }
     const targets = getEmailTargetsForStatus(updatedTx, sessionEmail)
 
@@ -1019,7 +819,7 @@ function App() {
     const targets = getEmailTargetsForStatus(tx, sessionEmail)
 
     if (!targets.length) {
-      notify('error', 'Pro stav "' + statusLabel[tx.status] + '" není dostupná email šablona.')
+      notify('error', `Pro stav "${statusLabel[tx.status]}" není dostupná email šablona.`)
       return
     }
 
@@ -1029,9 +829,8 @@ function App() {
     let failed = 0
     for (const target of targets) {
       const result = await sendEmailDirect(tx.id, target.templateKey, target.toEmail)
-      if (result.ok) {
-        sent++
-      } else {
+      if (result.ok) sent++
+      else {
         failed++
         console.warn(`[Depozitka] Direct email failed (${target.templateKey} → ${target.toEmail}):`, result.error)
       }
@@ -1050,24 +849,18 @@ function App() {
     await reloadAll()
   }
 
+  // ── Computed ─────────────────────────────────────────────
+
   const summary = useMemo(() => {
     const resolve = transactions.filter((t) => ['disputed', 'hold'].includes(t.status)).length
     const processing = transactions.filter((t) => ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(t.status)).length
     const closed = transactions.filter((t) => ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(t.status)).length
     const totalVolume = transactions.reduce((acc, tx) => acc + tx.amountCzk, 0)
-
-    return {
-      total: transactions.length,
-      resolve,
-      processing,
-      closed,
-      totalVolume,
-    }
+    return { total: transactions.length, resolve, processing, closed, totalVolume }
   }, [transactions])
 
   const filteredTransactions = useMemo(() => {
     const q = searchText.trim().toLowerCase()
-
     return transactions.filter((tx) => {
       const statusOk = statusFilter === 'all' || tx.status === statusFilter
       if (!statusOk) return false
@@ -1077,11 +870,9 @@ function App() {
         (quickFilter === 'resolve' && ['disputed', 'hold'].includes(tx.status)) ||
         (quickFilter === 'processing' && ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(tx.status)) ||
         (quickFilter === 'closed' && ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(tx.status))
-
       if (!quickOk) return false
 
       if (!q) return true
-
       const haystack = `${tx.transactionCode} ${tx.externalOrderId} ${tx.buyerName} ${tx.buyerEmail} ${tx.sellerName} ${tx.sellerEmail}`.toLowerCase()
       return haystack.includes(q)
     })
@@ -1091,9 +882,7 @@ function App() {
     () => ({
       resolve: filteredTransactions.filter((t) => ['disputed', 'hold'].includes(t.status)),
       processing: filteredTransactions.filter((t) => ['created', 'partial_paid', 'paid', 'shipped', 'delivered'].includes(t.status)),
-      closed: filteredTransactions.filter((t) =>
-        ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(t.status),
-      ),
+      closed: filteredTransactions.filter((t) => ['completed', 'auto_completed', 'refunded', 'cancelled', 'payout_sent', 'payout_confirmed'].includes(t.status)),
     }),
     [filteredTransactions],
   )
@@ -1103,6 +892,37 @@ function App() {
     return events.filter((event) => event.transactionCode === selectedTx.transactionCode)
   }, [events, selectedTx])
 
+  // ── Render helpers ───────────────────────────────────────
+
+  function renderTxGroup(label: string, txList: Transaction[], emptyText: string) {
+    return (
+      <div className="group">
+        <h3>{label} ({txList.length})</h3>
+        {txList.length === 0 && <EmptyGroup text={emptyText} />}
+        {txList.map((tx) => (
+          <TxCard
+            key={tx.id}
+            tx={tx}
+            note={statusNote[tx.id] || ''}
+            change={statusChange[tx.id] || ''}
+            emailBusy={Boolean(manualEmailBusy[tx.id])}
+            onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
+            paidAmount={manualPaidAmount[tx.id] || ''}
+            onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
+            onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
+            onApply={() => void requestStatusChange(tx)}
+            onOpenDetail={() => setSelectedTx(tx)}
+            trackingNum={trackingNumber[tx.id] || ''}
+            onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
+            onSendManualEmail={() => void sendManualEmailForTx(tx)}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  // ── Render ───────────────────────────────────────────────
+
   return (
     <div className={`app theme-${theme}`}>
       <header className="hero">
@@ -1110,7 +930,11 @@ function App() {
           <span className="brandBadge">🛡️ Depozitka · Trust Clean</span>
           <h1>Depozitka Core</h1>
           <p>Bezpečná escrow administrativa s důrazem na jasný stav, audit a rychlé rozhodování.</p>
-          {isAuthed && <p className="hint">Přihlášený: {sessionEmail || '-'} · Role: <strong>{roleLabel(userRole)}</strong></p>}
+          {isAuthed && (
+            <p className="hint">
+              Přihlášený: {sessionEmail || '-'} · Role: <strong>{roleLabel(userRole)}</strong>
+            </p>
+          )}
         </div>
         <div className="heroActions">
           <button className="btn btnGhost" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
@@ -1153,7 +977,9 @@ function App() {
       {flash && (
         <div className={`flash ${flash.type}`} role="alert">
           <span>{flash.text}</span>
-          <button className="btn btnGhost" style={{ marginLeft: 8, padding: '2px 8px' }} onClick={() => setFlash(null)}>Zavřít</button>
+          <button className="btn btnGhost" style={{ marginLeft: 8, padding: '2px 8px' }} onClick={() => setFlash(null)}>
+            Zavřít
+          </button>
         </div>
       )}
 
@@ -1207,37 +1033,10 @@ function App() {
           {tab === 'dashboard' && (
             <>
               <section className="statsGrid">
-                <StatCard
-                  label="Všechny transakce"
-                  value={summary.total.toString()}
-                  tone="neutral"
-                  active={quickFilter === 'all'}
-                  onClick={() => {
-                    setQuickFilter('all')
-                    setStatusFilter('all')
-                  }}
-                />
-                <StatCard
-                  label="K řešení"
-                  value={summary.resolve.toString()}
-                  tone="danger"
-                  active={quickFilter === 'resolve'}
-                  onClick={() => setQuickFilter('resolve')}
-                />
-                <StatCard
-                  label="V procesu"
-                  value={summary.processing.toString()}
-                  tone="info"
-                  active={quickFilter === 'processing'}
-                  onClick={() => setQuickFilter('processing')}
-                />
-                <StatCard
-                  label="Ukončeno"
-                  value={summary.closed.toString()}
-                  tone="success"
-                  active={quickFilter === 'closed'}
-                  onClick={() => setQuickFilter('closed')}
-                />
+                <StatCard label="Všechny transakce" value={summary.total.toString()} tone="neutral" active={quickFilter === 'all'} onClick={() => { setQuickFilter('all'); setStatusFilter('all') }} />
+                <StatCard label="K řešení" value={summary.resolve.toString()} tone="danger" active={quickFilter === 'resolve'} onClick={() => setQuickFilter('resolve')} />
+                <StatCard label="V procesu" value={summary.processing.toString()} tone="info" active={quickFilter === 'processing'} onClick={() => setQuickFilter('processing')} />
+                <StatCard label="Ukončeno" value={summary.closed.toString()} tone="success" active={quickFilter === 'closed'} onClick={() => setQuickFilter('closed')} />
                 <StatCard label="Objem transakcí" value={formatPrice(summary.totalVolume)} tone="neutral" />
               </section>
 
@@ -1245,42 +1044,15 @@ function App() {
                 <section className="panel createPanel">
                   <div className="createPanelBody">
                     <div className="formGrid">
-                      <label>
-                        External order ID
-                        <input value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)} />
-                      </label>
-                      <label>
-                        Buyer name
-                        <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
-                      </label>
-                      <label>
-                        Buyer email
-                        <input type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
-                      </label>
-                      <label>
-                        Seller name
-                        <input value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
-                      </label>
-                      <label>
-                        Seller email
-                        <input type="email" value={sellerEmail} onChange={(e) => setSellerEmail(e.target.value)} />
-                      </label>
-                      <label>
-                        Amount (Kč)
-                        <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} />
-                      </label>
-                      <label>
-                        Seller payout IBAN <span className="muted">(volitelné)</span>
-                        <input value={sellerPayoutIban} onChange={(e) => setSellerPayoutIban(e.target.value)} placeholder="CZ6508000000192000145399" />
-                      </label>
-                      <label>
-                        Seller payout jméno účtu <span className="muted">(volitelné)</span>
-                        <input value={sellerPayoutAccountName} onChange={(e) => setSellerPayoutAccountName(e.target.value)} />
-                      </label>
-                      <label>
-                        Seller payout BIC <span className="muted">(volitelné)</span>
-                        <input value={sellerPayoutBic} onChange={(e) => setSellerPayoutBic(e.target.value)} placeholder="GIBACZPX" />
-                      </label>
+                      <label>External order ID<input value={externalOrderId} onChange={(e) => setExternalOrderId(e.target.value)} /></label>
+                      <label>Buyer name<input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} /></label>
+                      <label>Buyer email<input type="email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} /></label>
+                      <label>Seller name<input value={sellerName} onChange={(e) => setSellerName(e.target.value)} /></label>
+                      <label>Seller email<input type="email" value={sellerEmail} onChange={(e) => setSellerEmail(e.target.value)} /></label>
+                      <label>Amount (Kč)<input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} /></label>
+                      <label>Seller payout IBAN <span className="muted">(volitelné)</span><input value={sellerPayoutIban} onChange={(e) => setSellerPayoutIban(e.target.value)} placeholder="CZ6508000000192000145399" /></label>
+                      <label>Seller payout jméno účtu <span className="muted">(volitelné)</span><input value={sellerPayoutAccountName} onChange={(e) => setSellerPayoutAccountName(e.target.value)} /></label>
+                      <label>Seller payout BIC <span className="muted">(volitelné)</span><input value={sellerPayoutBic} onChange={(e) => setSellerPayoutBic(e.target.value)} placeholder="GIBACZPX" /></label>
                     </div>
                     <button className="btn btnPrimary" onClick={() => void createTransaction()} disabled={busy}>
                       {busy ? 'Vytvářím...' : 'Vytvořit transakci'}
@@ -1292,24 +1064,11 @@ function App() {
               <section className="panel">
                 <h2>Escrow pipeline</h2>
                 <div className="filtersRow">
-                  <input
-                    className="searchInput"
-                    placeholder="Hledat podle tx, order ID, kupujícího nebo prodejce..."
-                    value={searchText}
-                    onChange={(e) => setSearchText(e.target.value)}
-                  />
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => {
-                      setStatusFilter(e.target.value as 'all' | EscrowStatus)
-                      setQuickFilter('all')
-                    }}
-                  >
+                  <input className="searchInput" placeholder="Hledat podle tx, order ID, kupujícího nebo prodejce..." value={searchText} onChange={(e) => setSearchText(e.target.value)} />
+                  <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as 'all' | EscrowStatus); setQuickFilter('all') }}>
                     <option value="all">Všechny stavy</option>
                     {Object.keys(statusLabel).map((status) => (
-                      <option key={status} value={status}>
-                        {statusLabel[status as EscrowStatus]}
-                      </option>
+                      <option key={status} value={status}>{statusLabel[status as EscrowStatus]}</option>
                     ))}
                   </select>
                 </div>
@@ -1318,74 +1077,9 @@ function App() {
                 </p>
 
                 <div className="groupWrap">
-                  <div className="group">
-                    <h3>K řešení ({grouped.resolve.length})</h3>
-                    {grouped.resolve.length === 0 && <EmptyGroup text="Momentálně nic k řešení." />}
-                    {grouped.resolve.map((tx) => (
-                      <TxCard
-                        key={tx.id}
-                        tx={tx}
-                        note={statusNote[tx.id] || ''}
-                        change={statusChange[tx.id] || ''}
-                        emailBusy={Boolean(manualEmailBusy[tx.id])}
-                        onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
-                        paidAmount={manualPaidAmount[tx.id] || ''}
-                        onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
-                        onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
-                        onApply={() => void requestStatusChange(tx)}
-                        onOpenDetail={() => setSelectedTx(tx)}
-                        trackingNum={trackingNumber[tx.id] || ''}
-                        onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
-                        onSendManualEmail={() => void sendManualEmailForTx(tx)}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="group">
-                    <h3>V procesu ({grouped.processing.length})</h3>
-                    {grouped.processing.length === 0 && <EmptyGroup text="Žádná rozpracovaná transakce." />}
-                    {grouped.processing.map((tx) => (
-                      <TxCard
-                        key={tx.id}
-                        tx={tx}
-                        note={statusNote[tx.id] || ''}
-                        change={statusChange[tx.id] || ''}
-                        emailBusy={Boolean(manualEmailBusy[tx.id])}
-                        onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
-                        paidAmount={manualPaidAmount[tx.id] || ''}
-                        onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
-                        onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
-                        onApply={() => void requestStatusChange(tx)}
-                        onOpenDetail={() => setSelectedTx(tx)}
-                        trackingNum={trackingNumber[tx.id] || ''}
-                        onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
-                        onSendManualEmail={() => void sendManualEmailForTx(tx)}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="group">
-                    <h3>Ukončeno ({grouped.closed.length})</h3>
-                    {grouped.closed.length === 0 && <EmptyGroup text="Zatím bez ukončených transakcí." />}
-                    {grouped.closed.map((tx) => (
-                      <TxCard
-                        key={tx.id}
-                        tx={tx}
-                        note={statusNote[tx.id] || ''}
-                        change={statusChange[tx.id] || ''}
-                        emailBusy={Boolean(manualEmailBusy[tx.id])}
-                        onNote={(value) => setStatusNote((prev) => ({ ...prev, [tx.id]: value }))}
-                        paidAmount={manualPaidAmount[tx.id] || ''}
-                        onPaidAmount={(value) => setManualPaidAmount((prev) => ({ ...prev, [tx.id]: value }))}
-                        onChange={(value) => setStatusChange((prev) => ({ ...prev, [tx.id]: value }))}
-                        onApply={() => void requestStatusChange(tx)}
-                        onOpenDetail={() => setSelectedTx(tx)}
-                        trackingNum={trackingNumber[tx.id] || ''}
-                        onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [tx.id]: value }))}
-                        onSendManualEmail={() => void sendManualEmailForTx(tx)}
-                      />
-                    ))}
-                  </div>
+                  {renderTxGroup('K řešení', grouped.resolve, 'Momentálně nic k řešení.')}
+                  {renderTxGroup('V procesu', grouped.processing, 'Žádná rozpracovaná transakce.')}
+                  {renderTxGroup('Ukončeno', grouped.closed, 'Zatím bez ukončených transakcí.')}
                 </div>
               </section>
             </>
@@ -1403,15 +1097,7 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Čas</th>
-                      <th>Tx</th>
-                      <th>Template</th>
-                      <th>Komu</th>
-                      <th>Předmět</th>
-                      <th>Stav</th>
-                      <th>Odesláno</th>
-                      <th>Provider ID</th>
-                      <th>Chyba</th>
+                      <th>Čas</th><th>Tx</th><th>Template</th><th>Komu</th><th>Předmět</th><th>Stav</th><th>Odesláno</th><th>Provider ID</th><th>Chyba</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1437,11 +1123,7 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Čas</th>
-                      <th>Tx</th>
-                      <th>Typ</th>
-                      <th>Přechod</th>
-                      <th>Poznámka</th>
+                      <th>Čas</th><th>Tx</th><th>Typ</th><th>Přechod</th><th>Poznámka</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1450,9 +1132,7 @@ function App() {
                         <td>{formatDate(event.createdAt)}</td>
                         <td>{event.transactionCode}</td>
                         <td>{event.eventType}</td>
-                        <td>
-                          {event.oldStatus || '-'} → {event.newStatus || '-'}
-                        </td>
+                        <td>{event.oldStatus || '-'} → {event.newStatus || '-'}</td>
                         <td>{event.note || '-'}</td>
                       </tr>
                     ))}
@@ -1525,13 +1205,7 @@ function App() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Prefix</th>
-                          <th>Label</th>
-                          <th>Scopes</th>
-                          <th>Stav</th>
-                          <th>Poslední použití</th>
-                          <th>Expirace</th>
-                          <th>Akce</th>
+                          <th>Prefix</th><th>Label</th><th>Scopes</th><th>Stav</th><th>Poslední použití</th><th>Expirace</th><th>Akce</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1550,13 +1224,7 @@ function App() {
                               <td>{k.expiresAt ? formatDate(k.expiresAt) : 'Bez expirace'}</td>
                               <td>
                                 {!k.revokedAt && (
-                                  <button
-                                    className="btn btnDanger btnSm"
-                                    onClick={() => {
-                                      const reason = prompt('Důvod zrušení klíče:')
-                                      if (reason !== null) void revokeApiKey(k.id, reason)
-                                    }}
-                                  >
+                                  <button className="btn btnDanger btnSm" onClick={() => { const reason = prompt('Důvod zrušení klíče:'); if (reason !== null) void revokeApiKey(k.id, reason) }}>
                                     Revoke
                                   </button>
                                 )}
@@ -1590,9 +1258,7 @@ function App() {
                     <div className="generatedKeyBox">
                       <p><strong>⚠️ Nový klíč - zkopíruj ho teď, nebude znovu zobrazen!</strong></p>
                       <code className="generatedKeyValue">{generatedKey}</code>
-                      <button className="btn btnSecondary btnSm" onClick={() => { void navigator.clipboard.writeText(generatedKey); notify('success', 'Zkopírováno!') }}>
-                        📋 Kopírovat
-                      </button>
+                      <button className="btn btnSecondary btnSm" onClick={() => { void navigator.clipboard.writeText(generatedKey); notify('success', 'Zkopírováno!') }}>📋 Kopírovat</button>
                       <button className="btn btnGhost btnSm" onClick={() => setGeneratedKey(null)}>Zavřít</button>
                     </div>
                   )}
@@ -1683,14 +1349,7 @@ function App() {
                         <table>
                           <thead>
                             <tr>
-                              <th>Datum</th>
-                              <th>Částka</th>
-                              <th>VS</th>
-                              <th>Protiúčet</th>
-                              <th>Zpráva</th>
-                              <th>Stav</th>
-                              <th>Transakce</th>
-                              <th>Akce</th>
+                              <th>Datum</th><th>Částka</th><th>VS</th><th>Protiúčet</th><th>Zpráva</th><th>Stav</th><th>Transakce</th><th>Akce</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1715,16 +1374,10 @@ function App() {
                                   {!b.matched && !b.ignored && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
                                       <div style={{ display: 'flex', gap: 4 }}>
-                                        <select
-                                          value={bankMatchTxId[b.bankTxId] || ''}
-                                          onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))}
-                                          style={{ flex: 1, fontSize: '0.85em' }}
-                                        >
+                                        <select value={bankMatchTxId[b.bankTxId] || ''} onChange={(e) => setBankMatchTxId((prev) => ({ ...prev, [b.bankTxId]: e.target.value }))} style={{ flex: 1, fontSize: '0.85em' }}>
                                           <option value="">Přiřadit k…</option>
                                           {payableTxs.map((tx) => (
-                                            <option key={tx.id} value={tx.id}>
-                                              {tx.transactionCode} · {formatPrice(tx.amountCzk)} · {tx.buyerName}
-                                            </option>
+                                            <option key={tx.id} value={tx.id}>{tx.transactionCode} · {formatPrice(tx.amountCzk)} · {tx.buyerName}</option>
                                           ))}
                                         </select>
                                         <button className="btn btnPrimary" style={{ fontSize: '0.8em', padding: '2px 8px' }} disabled={bankBusy || !bankMatchTxId[b.bankTxId]} onClick={() => void manualMatchPayment(b.bankTxId, bankMatchTxId[b.bankTxId])}>✓</button>
@@ -1822,548 +1475,6 @@ function App() {
           }}
         />
       )}
-    </div>
-  )
-}
-
-function LandingSection({ onLoginClick }: { onLoginClick: () => void }) {
-  return (
-    <section className="landing panel">
-      <div className="landingHero">
-        <div>
-          <h2>Escrow, které je srozumitelné i pro běžné uživatele</h2>
-          <p>
-            Depozitka oddělí peníze od marketplace, vede jasný průběh transakce a chrání kupujícího i prodávajícího.
-          </p>
-          <div className="landingActions">
-            <button className="btn btnPrimary" onClick={onLoginClick}>
-              Vstoupit do adminu
-            </button>
-            <a className="btn btnSecondary linkButton" href="#">
-              Dokumentace API (coming soon)
-            </a>
-          </div>
-        </div>
-        <div className="landingCard">
-          <h3>Flow v kostce</h3>
-          <ol>
-            <li>Marketplace založí transakci</li>
-            <li>Kupující zaplatí do úschovy</li>
-            <li>Prodávající odešle zásilku</li>
-            <li>Po potvrzení doručení jde výplata prodejci</li>
-          </ol>
-        </div>
-      </div>
-
-      <div className="landingFeatures">
-        <article>
-          <h3>🔌 Integrace pro marketplace</h3>
-          <p>Jednotný escrow engine pro více tržišť, pilotně napojený Test Bazar.</p>
-        </article>
-        <article>
-          <h3>🧾 Audit a dohledatelnost</h3>
-          <p>Každá změna stavu i notifikace mají stopu pro interní i právní potřeby.</p>
-        </article>
-        <article>
-          <h3>⚖️ Sporové řízení</h3>
-          <p>Spory, hold a refund workflow jsou řízené a vynucují odůvodnění kritických kroků.</p>
-        </article>
-      </div>
-    </section>
-  )
-}
-
-function EmptyGroup({ text }: { text: string }) {
-  return <p className="emptyGroup">{text}</p>
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-  active = false,
-  onClick,
-}: {
-  label: string
-  value: string
-  tone: 'neutral' | 'danger' | 'info' | 'success'
-  active?: boolean
-  onClick?: () => void
-}) {
-  return (
-    <button
-      type="button"
-      className={`statCard ${tone} ${active ? 'active' : ''} ${onClick ? '' : 'nonInteractive'}`}
-      onClick={onClick}
-      disabled={!onClick}
-    >
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </button>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// ShieldTrack Verification Panel
-// ---------------------------------------------------------------------------
-
-const CHECK_NAME_CS: Record<string, string> = {
-  tracking_exists: 'Tracking číslo existuje',
-  tracking_active: 'Zásilka je aktivní',
-  recipient_name_match: 'Shoda jména příjemce',
-  city_match: 'Shoda města doručení',
-  zip_match: 'Shoda PSČ',
-  timeline_valid: 'Platná časová osa',
-  delivery_confirmed: 'Potvrzení doručení',
-}
-
-const CHECK_ICON: Record<string, string> = {
-  passed: '✅', warning: '⚠️', failed: '❌', pending: '⏳',
-}
-
-function getScoreColor(score: number): string {
-  if (score >= 80) return '#22c55e'
-  if (score >= 40) return '#f59e0b'
-  return '#ef4444'
-}
-
-interface STCheck { name: string; status: string; detail: string | null }
-interface STVerification {
-  score: number
-  status: string
-  checks: STCheck[]
-  address_match: { city: boolean; zip: boolean } | null
-  verified_at: string | null
-}
-
-function ShieldTrackPanel({ transactionId, cachedScore, cachedStatus }: { transactionId: string; cachedScore: number | null; cachedStatus: string | null }) {
-  const [verification, setVerification] = useState<STVerification | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState(false)
-  const [error, setError] = useState('')
-
-  const engineUrl = import.meta.env.VITE_ENGINE_URL || ''
-
-  const fetchVerification = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const res = await fetch(`${engineUrl}/api/verification?transaction_id=${transactionId}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      if (data.available && data.verification) {
-        setVerification(data.verification)
-      } else {
-        setError('Verifikace není dostupná')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba')
-    } finally {
-      setLoading(false)
-    }
-  }, [transactionId, engineUrl])
-
-  // Show cached summary + load details on expand
-  const score = verification?.score ?? cachedScore
-  const status = verification?.status ?? cachedStatus
-  const scoreColor = score != null ? getScoreColor(score) : '#6b7280'
-
-  const statusLabels: Record<string, string> = {
-    verified: '✅ Ověřeno',
-    partial: '⚠️ Částečně',
-    failed: '❌ Selhalo',
-    pending: '⏳ Čeká',
-  }
-
-  return (
-    <div className="drawerSection">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h4 style={{ margin: 0 }}>🛡️ ShieldTrack</h4>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {score != null && (
-            <span style={{ fontWeight: 700, color: scoreColor, fontSize: '1.1em' }}>
-              {score}/100
-            </span>
-          )}
-          {status && (
-            <span style={{ fontSize: '0.85em' }}>
-              {statusLabels[status] || status}
-            </span>
-          )}
-          <button
-            className="btn btnSecondary"
-            style={{ padding: '4px 10px', fontSize: '0.8em' }}
-            onClick={() => {
-              if (!expanded) fetchVerification()
-              setExpanded(!expanded)
-            }}
-          >
-            {expanded ? 'Skrýt' : 'Detail'}
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div style={{ marginTop: '12px' }}>
-          {loading && <p className="hint">⏳ Načítám verifikaci...</p>}
-          {error && <p className="hint" style={{ color: '#ef4444' }}>❌ {error}</p>}
-          {verification && (
-            <>
-              {/* Score bar */}
-              <div style={{ marginBottom: '12px' }}>
-                <div style={{ height: '6px', borderRadius: '3px', background: '#334155', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${verification.score}%`, background: getScoreColor(verification.score), borderRadius: '3px', transition: 'width 0.4s' }} />
-                </div>
-              </div>
-
-              {/* Checks */}
-              {verification.checks.map((check, i) => (
-                <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', padding: '4px 0', fontSize: '0.85em' }}>
-                  <span>{CHECK_ICON[check.status] || '⏳'}</span>
-                  <div>
-                    <strong>{CHECK_NAME_CS[check.name] || check.name}</strong>
-                    {check.detail && <div style={{ color: '#94a3b8', fontSize: '0.9em' }}>{check.detail}</div>}
-                  </div>
-                </div>
-              ))}
-
-              {verification.verified_at && (
-                <p style={{ fontSize: '0.75em', color: '#64748b', marginTop: '8px', textAlign: 'right' }}>
-                  Ověřeno: {new Date(verification.verified_at).toLocaleString('cs-CZ')}
-                </p>
-              )}
-
-              <button
-                className="btn btnSecondary"
-                style={{ marginTop: '8px', padding: '4px 10px', fontSize: '0.8em' }}
-                onClick={fetchVerification}
-                disabled={loading}
-              >
-                🔄 Obnovit
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function TxCard({
-  tx,
-  change,
-  note,
-  paidAmount = '',
-  trackingNum = '',
-  emailBusy = false,
-  onChange,
-  onNote,
-  onPaidAmount,
-  onTrackingNumber,
-  onApply,
-  onOpenDetail,
-  onSendManualEmail,
-}: {
-  tx: Transaction
-  change: EscrowStatus | ''
-  note: string
-  paidAmount?: string
-  trackingNum?: string
-  emailBusy?: boolean
-  onChange: (value: EscrowStatus | '') => void
-  onNote: (value: string) => void
-  onPaidAmount?: (value: string) => void
-  onTrackingNumber?: (value: string) => void
-  onApply: () => void
-  onOpenDetail: () => void
-  onSendManualEmail: () => void
-}) {
-  const nextOptions = allowedTransitions[tx.status]
-
-  return (
-    <article className="txCard">
-      <div className="txHead">
-        <strong>{tx.transactionCode}</strong>
-        <span className={`status ${tx.status}`}>{statusLabel[tx.status]}</span>
-      </div>
-
-      <p>
-        <strong>Bazar:</strong> {tx.marketplaceName} <span className="muted">({tx.marketplaceCode})</span>
-      </p>
-      <p>
-        <strong>Order:</strong> {tx.externalOrderId}
-      </p>
-      <p>
-        <strong>Kupující:</strong> {tx.buyerName} ({tx.buyerEmail})
-      </p>
-      <p>
-        <strong>Prodávající:</strong> {tx.sellerName} ({tx.sellerEmail})
-      </p>
-      <p>
-        <strong>Payout:</strong> {maskIban(tx.sellerPayoutIban)} · {payoutSourceLabel(tx.sellerPayoutSource)}
-        {tx.sellerPayoutLockedAt ? ' 🔒' : ''}
-      </p>
-      <p>
-        <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
-        <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
-      </p>
-      {tx.paidAmountCzk > 0 && (
-        <p>
-          <strong>Uhrazeno:</strong> {formatPrice(tx.paidAmountCzk)} · <strong>Zbývá:</strong> {formatPrice(tx.amountCzk - tx.paidAmountCzk)}
-        </p>
-      )}
-      <p>
-        <strong>Update:</strong> {formatDate(tx.updatedAt)}
-      </p>
-      {tx.shippingCarrier && (
-        <p>
-          <strong>📦 Zásilka:</strong> {tx.shippingCarrier}
-          {tx.shippingTrackingNumber && <> · {tx.shippingTrackingNumber}</>}
-          {tx.stScore != null && (
-            <span style={{ marginLeft: '8px', fontWeight: 700, color: getScoreColor(tx.stScore) }}>
-              🛡️ {tx.stScore}/100
-            </span>
-          )}
-        </p>
-      )}
-
-      <div className="txActions">
-        <select value={change} onChange={(e) => onChange((e.target.value as EscrowStatus) || '')}>
-          <option value="">Zvol nový stav</option>
-          {nextOptions.map((status) => (
-            <option key={status} value={status}>
-              {statusLabel[status]}
-            </option>
-          ))}
-        </select>
-        <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
-        {change === 'partial_paid' && (
-          <input
-            type="number"
-            min={0}
-            max={tx.amountCzk}
-            step={0.01}
-            value={paidAmount}
-            onChange={(e) => onPaidAmount?.(e.target.value)}
-            placeholder="Již uhrazeno (Kč)"
-            style={{ borderColor: '#f59e0b' }}
-          />
-        )}
-        {change === 'shipped' && (
-          <input
-            value={trackingNum}
-            onChange={(e) => onTrackingNumber?.(e.target.value)}
-            placeholder="Tracking číslo zásilky"
-            style={{ borderColor: '#3b82f6' }}
-          />
-        )}
-        <div className="txButtons">
-          <button className="btn btnSecondary" onClick={onOpenDetail}>
-            Detail
-          </button>
-          <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
-            {emailBusy ? 'Odesílám...' : 'Odeslat email'}
-          </button>
-          <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
-            Potvrdit změnu
-          </button>
-        </div>
-      </div>
-    </article>
-  )
-}
-
-function TxDrawer({
-  tx,
-  events,
-  change,
-  note,
-  paidAmount = '',
-  trackingNum = '',
-  emailBusy = false,
-  onClose,
-  onChange,
-  onNote,
-  onPaidAmount,
-  onTrackingNumber,
-  onApply,
-  onSendManualEmail,
-}: {
-  tx: Transaction
-  events: TxEvent[]
-  change: EscrowStatus | ''
-  note: string
-  paidAmount?: string
-  trackingNum?: string
-  emailBusy?: boolean
-  onClose: () => void
-  onChange: (value: EscrowStatus | '') => void
-  onNote: (value: string) => void
-  onPaidAmount?: (value: string) => void
-  onTrackingNumber?: (value: string) => void
-  onApply: () => void
-  onSendManualEmail: () => void
-}) {
-  const nextOptions = allowedTransitions[tx.status]
-
-  return (
-    <div className="drawerOverlay" role="presentation" onClick={onClose}>
-      <aside className="drawer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <div className="drawerHead">
-          <h3>{tx.transactionCode}</h3>
-          <button className="btn btnSecondary" onClick={onClose}>
-            Zavřít
-          </button>
-        </div>
-
-        <div className="drawerSection">
-          <p>
-            <strong>Bazar:</strong> {tx.marketplaceName} <span className="muted">({tx.marketplaceCode})</span>
-          </p>
-          <p>
-            <strong>Order:</strong> {tx.externalOrderId}
-          </p>
-          <p>
-            <strong>Stav:</strong> {statusLabel[tx.status]}
-          </p>
-          <p>
-            <strong>Kupující:</strong> {tx.buyerName} ({tx.buyerEmail})
-          </p>
-          <p>
-            <strong>Prodávající:</strong> {tx.sellerName} ({tx.sellerEmail})
-          </p>
-          <p><strong>Payout IBAN:</strong> {maskIban(tx.sellerPayoutIban)}</p>
-          <p><strong>Payout jméno:</strong> {tx.sellerPayoutAccountName || '-'}</p>
-          <p><strong>Payout BIC:</strong> {tx.sellerPayoutBic || '-'}</p>
-          <p><strong>Payout source:</strong> {payoutSourceLabel(tx.sellerPayoutSource)}</p>
-          <p><strong>Payout lock:</strong> {tx.sellerPayoutLockedAt ? `🔒 ${formatDate(tx.sellerPayoutLockedAt)}` : 'Odemčeno'}</p>
-          <p>
-            <strong>Částka:</strong> {formatPrice(tx.amountCzk)} · <strong>Provize:</strong> {formatPrice(tx.feeAmountCzk)} ·{' '}
-            <strong>Výplata:</strong> {formatPrice(tx.payoutAmountCzk)}
-          </p>
-          {tx.paidAmountCzk > 0 && (
-            <p>
-              <strong>Uhrazeno:</strong> {formatPrice(tx.paidAmountCzk)} · <strong>Zbývá:</strong> {formatPrice(tx.amountCzk - tx.paidAmountCzk)}
-            </p>
-          )}
-          <p>
-            <strong>Update:</strong> {formatDate(tx.updatedAt)}
-          </p>
-        </div>
-
-        {/* Shipping info */}
-        {tx.shippingCarrier && (
-          <div className="drawerSection">
-            <h4>📦 Zásilka</h4>
-            <p><strong>Dopravce:</strong> {tx.shippingCarrier}</p>
-            {tx.shippingTrackingNumber && <p><strong>Tracking:</strong> {tx.shippingTrackingNumber}</p>}
-          </div>
-        )}
-
-        {/* ShieldTrack verification */}
-        {tx.shieldtrackShipmentId && (
-          <ShieldTrackPanel transactionId={tx.id} cachedScore={tx.stScore} cachedStatus={tx.stStatus} />
-        )}
-
-        <div className="drawerSection">
-          <h4>Rychlá akce</h4>
-          <div className="txActions">
-            <select value={change} onChange={(e) => onChange((e.target.value as EscrowStatus) || '')}>
-              <option value="">Zvol nový stav</option>
-              {nextOptions.map((status) => (
-                <option key={status} value={status}>
-                  {statusLabel[status]}
-                </option>
-              ))}
-            </select>
-            <input value={note} onChange={(e) => onNote(e.target.value)} placeholder="Důvod/poznámka (povinné pro hold/spor)" />
-            {change === 'partial_paid' && (
-              <input
-                type="number"
-                min={0}
-                max={tx.amountCzk}
-                step={0.01}
-                value={paidAmount}
-                onChange={(e) => onPaidAmount?.(e.target.value)}
-                placeholder="Již uhrazeno (Kč)"
-                style={{ borderColor: '#f59e0b' }}
-              />
-            )}
-            {change === 'shipped' && (
-              <input
-                value={trackingNum}
-                onChange={(e) => onTrackingNumber?.(e.target.value)}
-                placeholder="Tracking číslo zásilky"
-                style={{ borderColor: '#3b82f6' }}
-              />
-            )}
-            <div className="txButtons">
-              <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
-                {emailBusy ? 'Odesílám...' : 'Odeslat email dle stavu'}
-              </button>
-              <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
-                Potvrdit změnu
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="drawerSection">
-          <h4>Timeline ({events.length})</h4>
-          {events.length === 0 ? (
-            <p className="hint">Zatím bez eventů.</p>
-          ) : (
-            <ul className="timeline">
-              {events.map((event) => (
-                <li key={event.id}>
-                  <div>
-                    <strong>{event.eventType}</strong>
-                    <p>
-                      {event.oldStatus || '-'} → {event.newStatus || '-'}
-                    </p>
-                    {event.note && <p>{event.note}</p>}
-                  </div>
-                  <span>{formatDate(event.createdAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </aside>
-    </div>
-  )
-}
-
-function ConfirmModal({
-  title,
-  message,
-  subText,
-  confirmLabel,
-  onCancel,
-  onConfirm,
-}: {
-  title: string
-  message: string
-  subText: string
-  confirmLabel: string
-  onCancel: () => void
-  onConfirm: () => void
-}) {
-  return (
-    <div className="modalOverlay" role="presentation" onClick={onCancel}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>{title}</h3>
-        <p>{message}</p>
-        <p className="hint">{subText}</p>
-        <div className="modalActions">
-          <button className="btn btnSecondary" onClick={onCancel}>
-            Zrušit
-          </button>
-          <button className="btn btnDanger" onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
