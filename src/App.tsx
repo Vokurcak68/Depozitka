@@ -653,7 +653,7 @@ function App() {
       return
     }
 
-    const orderIdToMatch = externalOrderId
+
 
     setBusy(true)
     const { error } = await supabase.rpc('dpt_create_transaction', {
@@ -685,42 +685,8 @@ function App() {
 
     setShowCreateForm(false)
     await reloadAll()
-
-    // Find the newly created tx in reloaded state and send emails (same as the button)
-    // reloadAll() is async and sets state, but we need the tx now — query directly
-    const { data: rows } = await supabase
-      .from('dpt_transactions')
-      .select('id, transaction_code, buyer_name, buyer_email, seller_name, seller_email, amount_czk, status')
-      .eq('external_order_id', orderIdToMatch)
-      .eq('status', 'created')
-      .order('created_at', { ascending: false })
-      .limit(1)
-
-    const newTx = rows?.[0]
-    if (newTx) {
-      // Reuse the same function the button uses
-      const fakeTx: Transaction = {
-        id: newTx.id,
-        transactionCode: newTx.transaction_code,
-        marketplaceCode: '',
-        marketplaceName: '',
-        externalOrderId: orderIdToMatch,
-        buyerName: newTx.buyer_name,
-        buyerEmail: newTx.buyer_email,
-        sellerName: newTx.seller_name,
-        sellerEmail: newTx.seller_email,
-        sellerPayoutIban: '', sellerPayoutAccountName: '', sellerPayoutBic: '',
-        sellerPayoutSource: '', sellerPayoutLockedAt: '',
-        amountCzk: Number(newTx.amount_czk), feeAmountCzk: 0, payoutAmountCzk: 0,
-        paidAmountCzk: 0, paymentReference: '',
-        status: 'created', updatedAt: '',
-        shippingCarrier: '', shippingTrackingNumber: '',
-        shieldtrackShipmentId: '', stScore: null, stStatus: null,
-      }
-      await sendManualEmailForTx(fakeTx)
-    } else {
-      notify('success', 'Transakce založena.')
-    }
+    // Email se odešle automaticky přes DB trigger (pg_net) po RPC insertu eventu
+    notify('success', 'Transakce založena. Email odeslán automaticky.')
   }
 
   // ── Status change ────────────────────────────────────────
@@ -799,9 +765,7 @@ function App() {
     setManualPaidAmount((prev) => ({ ...prev, [tx.id]: '' }))
     setTrackingNumber((prev) => ({ ...prev, [tx.id]: '' }))
     await reloadAll()
-
-    // Auto-send emails for the new status (same function as the button)
-    await sendManualEmailForTx({ ...tx, status: targetStatus })
+    // Email se odešle automaticky přes DB trigger (pg_net) po insertu eventu
   }
 
   async function requestStatusChange(tx: Transaction): Promise<void> {
