@@ -795,40 +795,10 @@ function App() {
     setStatusNote((prev) => ({ ...prev, [tx.id]: '' }))
     setManualPaidAmount((prev) => ({ ...prev, [tx.id]: '' }))
     setTrackingNumber((prev) => ({ ...prev, [tx.id]: '' }))
-    notify('success', `Stav změněn na: ${statusLabel[targetStatus]}`)
     await reloadAll()
 
-    // Send emails for the new status
-    const updatedTx: Transaction = {
-      ...tx,
-      status: targetStatus,
-      paidAmountCzk:
-        targetStatus === 'paid'
-          ? (manualAmount ?? tx.amountCzk)
-          : targetStatus === 'partial_paid'
-            ? (manualAmount ?? tx.paidAmountCzk)
-            : tx.paidAmountCzk,
-    }
-    const targets = getEmailTargetsForStatus(updatedTx, sessionEmail)
-
-    if (targets.length > 0) {
-      let sent = 0
-      let failed = 0
-      for (const target of targets) {
-        const result = await sendEmailDirect(tx.id, target.templateKey, target.toEmail)
-        if (result.ok) sent++
-        else {
-          failed++
-          console.warn(`[Depozitka] Email send failed (${target.templateKey} → ${target.toEmail}):`, result.error)
-        }
-      }
-
-      if (failed > 0) {
-        notify('error', `Odesláno ${sent}/${targets.length} emailů. ${failed} selhalo.`)
-      } else if (sent > 0) {
-        notify('success', `Stav změněn + ${sent} email${sent > 1 ? 'ů' : ''} odesláno.`)
-      }
-    }
+    // Auto-send emails for the new status (same function as the button)
+    await sendManualEmailForTx({ ...tx, status: targetStatus })
   }
 
   async function requestStatusChange(tx: Transaction): Promise<void> {
