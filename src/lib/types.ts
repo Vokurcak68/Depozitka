@@ -77,6 +77,21 @@ export interface PendingAction {
   note: string
 }
 
+export interface PayoutLog {
+  id: string
+  transactionId: string
+  transactionCode: string
+  amountCzk: number
+  iban: string
+  accountName?: string | null
+  variableSymbol?: string | null
+  fioResponse?: string | null
+  status: 'sent' | 'failed' | string
+  errorMessage?: string | null
+  triggeredBy?: string | null
+  createdAt: string
+}
+
 export interface Marketplace {
   id: string
   code: string

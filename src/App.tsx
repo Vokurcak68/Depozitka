@@ -11,6 +11,7 @@ import type {
   Transaction,
   TxEvent,
   EmailLog,
+  PayoutLog,
   PendingAction,
   Marketplace,
   MarketplaceForm,
@@ -44,12 +45,13 @@ import { TxCard } from './components/TxCard'
 import { TxDrawer } from './components/TxDrawer'
 import { ConfirmModal } from './components/ConfirmModal'
 import { EmailLogTab } from './components/EmailLogTab'
+import { PayoutLogTab } from './components/PayoutLogTab'
 import { MarketplaceTab } from './components/MarketplaceTab'
 import { SellerFallbackTab } from './components/SellerFallbackTab'
 import { BankTab } from './components/BankTab'
 
 function App() {
-  const [tab, setTab] = useState<'dashboard' | 'emails' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'emails' | 'payouts' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [userRole, setUserRole] = useState<UserRole>('unknown')
   const [password, setPassword] = useState('')
@@ -57,11 +59,13 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [emailLogsError, setEmailLogsError] = useState<string | null>(null)
+  const [payoutLogsError, setPayoutLogsError] = useState<string | null>(null)
   const [theme, setTheme] = useState<Theme>(resolveInitialTheme)
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [events, setEvents] = useState<TxEvent[]>([])
   const [emailLogs, setEmailLogs] = useState<EmailLog[]>([])
+  const [payoutLogs, setPayoutLogs] = useState<PayoutLog[]>([])
 
   const [externalOrderId, setExternalOrderId] = useState(`ORD-${new Date().getFullYear()}-1001`)
   const [buyerName, setBuyerName] = useState('Testující kupující')
@@ -269,6 +273,35 @@ function App() {
         setEmailLogsError(mailRes.error.message)
       }
 
+      const payoutRes = await supabase
+        .from('dpt_payout_log')
+        .select('id, transaction_id, transaction_code, amount_czk, iban, account_name, variable_symbol, fio_response, status, error_message, triggered_by, created_at')
+        .order('created_at', { ascending: false })
+        .limit(250)
+
+      if (!payoutRes.error) {
+        setPayoutLogsError(null)
+        setPayoutLogs(
+          (payoutRes.data || []).map((row) => ({
+            id: row.id,
+            transactionId: row.transaction_id,
+            transactionCode: row.transaction_code,
+            amountCzk: Number(row.amount_czk),
+            iban: row.iban,
+            accountName: row.account_name,
+            variableSymbol: row.variable_symbol,
+            fioResponse: row.fio_response,
+            status: row.status,
+            errorMessage: row.error_message,
+            triggeredBy: row.triggered_by,
+            createdAt: row.created_at,
+          })),
+        )
+      } else {
+        setPayoutLogs([])
+        setPayoutLogsError(payoutRes.error.message)
+      }
+
       const mpRes = await supabase
         .from('dpt_marketplaces')
         .select('id, code, name, active, fee_share_percent, settlement_account_name, settlement_iban, settlement_bic, notes, logo_url, accent_color, company_name, company_address, company_id, support_email, website_url')
@@ -387,6 +420,7 @@ function App() {
     setTransactions([])
     setEvents([])
     setEmailLogs([])
+    setPayoutLogs([])
     setSelectedTx(null)
     setFlash(null)
     setUserRole('unknown')
@@ -1033,6 +1067,11 @@ function App() {
                 Email + audit
               </button>
               {canUseAdminTabs(userRole) && (
+                <button className={tab === 'payouts' ? 'active' : ''} onClick={() => setTab('payouts')}>
+                  💸 Výplaty
+                </button>
+              )}
+              {canUseAdminTabs(userRole) && (
                 <>
                   <button className={tab === 'marketplaces' ? 'active' : ''} onClick={() => setTab('marketplaces')}>
                     Marketplaces
@@ -1108,6 +1147,20 @@ function App() {
 
           {tab === 'emails' && (
             <EmailLogTab emailLogs={emailLogs} emailLogsError={emailLogsError} events={events} />
+          )}
+
+          {canUseAdminTabs(userRole) && tab === 'payouts' && (
+            <PayoutLogTab
+              payoutLogs={payoutLogs}
+              payoutLogsError={payoutLogsError}
+              onSelectTransaction={(txId) => {
+                const tx = transactions.find((t) => t.id === txId)
+                if (tx) {
+                  setSelectedTx(tx)
+                  setTab('dashboard')
+                }
+              }}
+            />
           )}
 
           {canUseAdminTabs(userRole) && tab === 'marketplaces' && (
