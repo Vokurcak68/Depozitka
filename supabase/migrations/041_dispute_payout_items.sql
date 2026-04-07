@@ -2,33 +2,33 @@
 -- Tabulka dpt_payout_items — plán rozpadu výplaty (1 transakce = N příjemců)
 -- Podporuje: full refund kupujícímu, split seller/buyer, custom provize, platform fee (interní log)
 
--- 1) Nový stav transakce — dispute_settled (finální stav po rozeslání všech items)
+-- ============================================================
+-- ČÁST A: Rozšíření enumu dpt_tx_status o 'dispute_settled'
+-- POZOR: ALTER TYPE ADD VALUE musí být commitnutý PŘED použitím
+-- (PG nedovolí použít nový enum value ve stejné transakci).
+-- Spusť tuto část SAMOSTATNĚ jako první.
+-- ============================================================
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM public.dpt_statuses WHERE code = 'dispute_settled'
+    SELECT 1 FROM pg_enum
+    WHERE enumtypid = 'public.dpt_tx_status'::regtype
+      AND enumlabel = 'dispute_settled'
   ) THEN
-    INSERT INTO public.dpt_statuses (code, label, description, is_terminal, sort_order)
-    VALUES ('dispute_settled', 'Spor vypořádán', 'Výplaty ze sporu byly odeslány', true, 125);
+    ALTER TYPE public.dpt_tx_status ADD VALUE 'dispute_settled';
   END IF;
 END $$;
 
--- ALTER enumu dpt_escrow_status (pokud existuje)
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'dpt_escrow_status') THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_enum
-      WHERE enumtypid = 'public.dpt_escrow_status'::regtype
-        AND enumlabel = 'dispute_settled'
-    ) THEN
-      ALTER TYPE public.dpt_escrow_status ADD VALUE 'dispute_settled';
-    END IF;
-  END IF;
-END $$;
+COMMIT;
 
--- 2) Povolené přechody z disputed do dispute_settled (admin)
-INSERT INTO public.dpt_status_transitions (from_status, to_status, actor_role, is_terminal)
+-- ============================================================
+-- ČÁST B: Katalog stavu, přechody, tabulka items
+-- ============================================================
+INSERT INTO public.dpt_status_catalog (code, label, description, is_terminal, sort_order)
+VALUES ('dispute_settled', 'Spor vypořádán', 'Výplaty ze sporu byly odeslány', true, 125)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO public.dpt_status_transitions (from_status, to_status, allowed_actor_role, reason_required)
 VALUES ('disputed', 'dispute_settled', 'admin', true)
 ON CONFLICT DO NOTHING;
 
