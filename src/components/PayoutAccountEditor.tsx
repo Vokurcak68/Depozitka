@@ -64,18 +64,6 @@ export function PayoutAccountEditor({
     }
   }
 
-  if (locked) {
-    return (
-      <div className="drawerSection">
-        <h4>🏦 Účet pro výplatu</h4>
-        <p style={{ fontSize: '13px', color: 'var(--muted)' }}>
-          🔒 Údaje jsou zamčené.{' '}
-          {currentIban && <><br /><strong>IBAN:</strong> {formatIban(currentIban)}</>}
-        </p>
-      </div>
-    )
-  }
-
   if (!editing) {
     return (
       <div className="drawerSection">
@@ -84,6 +72,14 @@ export function PayoutAccountEditor({
           <p style={{ fontSize: '13px', marginBottom: '8px' }}>
             <strong>IBAN:</strong> {formatIban(currentIban)}
             {currentName && <><br /><strong>Jméno:</strong> {currentName}</>}
+            {locked && (
+              <>
+                <br />
+                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>
+                  🔒 Zamčeno (admin override stále možný)
+                </span>
+              </>
+            )}
           </p>
         ) : (
           <p style={{ fontSize: '13px', color: '#f59e0b', marginBottom: '8px' }}>
