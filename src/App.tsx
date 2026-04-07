@@ -25,6 +25,7 @@ import {
   emptyMpForm,
   emptySpForm,
   emptyApiKeyForm,
+  transitionRequiresNote,
 } from './lib/constants'
 import {
   normalizeIban,
@@ -747,23 +748,6 @@ function App() {
       }
     }
 
-    // DEBUG: spusť dpt_debug_change_status pro diagnostiku
-    const debugRes = await supabase.rpc('dpt_debug_change_status' as never, {
-      p_transaction_code: tx.transactionCode,
-      p_new_status: targetStatus,
-      p_actor_role: 'admin',
-    } as never)
-    console.log('[DEBUG] dpt_debug_change_status:', debugRes)
-    const debugText = JSON.stringify(debugRes.data || debugRes.error, null, 2)
-    // Vytvoř copy-friendly modal
-    try {
-      await navigator.clipboard.writeText(debugText)
-      notify('success', 'DEBUG zkopírováno do clipboardu! Vlož sem (Ctrl+V).')
-    } catch {
-      // fallback: prompt umožňuje označit a zkopírovat text
-      window.prompt('DEBUG dpt_debug_change_status (Ctrl+C):', debugText)
-    }
-
     const { error } = await supabase.rpc('dpt_change_status', {
       p_transaction_code: tx.transactionCode,
       p_new_status: targetStatus,
@@ -774,7 +758,14 @@ function App() {
     setBusy(false)
 
     if (error) {
-      notify('error', `Změna stavu selhala: ${error.message}`)
+      // Hezčí české hlášky pro známé chyby
+      let msg = error.message
+      if (/note.*required|reason.*required/i.test(msg)) {
+        msg = 'Pro tuto změnu je vyžadována poznámka/důvod.'
+      } else if (/not allowed for role/i.test(msg)) {
+        msg = `Tento přechod (${tx.status} → ${targetStatus}) není povolený pro tvou roli.`
+      }
+      notify('error', `Změna stavu selhala: ${msg}`)
       return
     }
 
@@ -792,8 +783,13 @@ function App() {
 
     const note = (statusNote[tx.id] || '').trim()
 
-    if ((targetStatus === 'hold' || targetStatus === 'disputed') && !note) {
-      notify('error', 'Pro HOLD/SPOR zadej důvod.')
+    // Vyžadovaná poznámka — buď ji vyžaduje DB (forward i rollback), nebo to jsou kritická akce
+    if (transitionRequiresNote(tx.status, targetStatus) && !note) {
+      const isRollback = ['paid', 'shipped', 'delivered', 'created', 'partial_paid'].includes(targetStatus)
+      const reason = isRollback
+        ? 'Vracíš stav zpět — zadej důvod do pole "Poznámka".'
+        : 'Pro tuto změnu zadej důvod do pole "Poznámka".'
+      notify('error', reason)
       return
     }
 

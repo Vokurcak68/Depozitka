@@ -1,5 +1,5 @@
 import type { EscrowStatus, Transaction, TxEvent } from '../lib/types'
-import { statusLabel, allowedTransitions } from '../lib/constants'
+import { statusLabel, allowedTransitions, transitionRequiresNote } from '../lib/constants'
 import { formatPrice, formatDate, maskIban, payoutSourceLabel } from '../lib/utils'
 import { ShieldTrackPanel } from './ShieldTrackPanel'
 import { PayoutAccountEditor } from './PayoutAccountEditor'
@@ -42,6 +42,8 @@ export function TxDrawer({
   onRefresh?: () => void
 }) {
   const nextOptions = allowedTransitions[tx.status]
+  const noteRequired = change ? transitionRequiresNote(tx.status, change) : false
+  const noteEmpty = !note.trim()
 
   return (
     <div className="drawerOverlay" role="presentation" onClick={onClose}>
@@ -138,8 +140,18 @@ export function TxDrawer({
             <input
               value={note}
               onChange={(e) => onNote(e.target.value)}
-              placeholder="Důvod/poznámka (povinné pro hold/spor)"
+              placeholder={noteRequired ? '⚠️ Důvod je povinný pro tuto změnu' : 'Důvod/poznámka (volitelné)'}
+              style={
+                noteRequired && noteEmpty
+                  ? { borderColor: '#dc2626', borderWidth: 2, background: '#fef2f2' }
+                  : undefined
+              }
             />
+            {noteRequired && noteEmpty && (
+              <p style={{ color: '#dc2626', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>
+                ⚠️ Pro změnu na "{statusLabel[change as EscrowStatus]}" je vyžadována poznámka/důvod.
+              </p>
+            )}
             {change === 'partial_paid' && (
               <input
                 type="number"
@@ -164,7 +176,11 @@ export function TxDrawer({
               <button className="btn btnSecondary" disabled={emailBusy} onClick={onSendManualEmail}>
                 {emailBusy ? 'Odesílám...' : 'Odeslat email dle stavu'}
               </button>
-              <button className="btn btnPrimary" disabled={!change} onClick={onApply}>
+              <button
+                className="btn btnPrimary"
+                disabled={!change || (noteRequired && noteEmpty)}
+                onClick={onApply}
+              >
                 Potvrdit změnu
               </button>
             </div>

@@ -41,6 +41,29 @@ export const allowedTransitions: Record<EscrowStatus, EscrowStatus[]> = {
   payout_confirmed: [],
 }
 
+// Přechody vyžadující poznámku/důvod (frontend validace, musí sedět s DB reason_required=true)
+// Forward: hold, disputed, refunded, cancelled
+// Rollback (admin korekce): vše z migrace 037
+export const transitionsRequiringNote: Record<EscrowStatus, EscrowStatus[]> = {
+  created: ['cancelled'],
+  partial_paid: ['cancelled', 'created'],
+  paid: ['disputed', 'hold', 'refunded', 'partial_paid', 'created'],
+  shipped: ['disputed', 'hold', 'paid'],
+  delivered: ['disputed', 'hold', 'shipped', 'paid'],
+  disputed: ['hold', 'refunded', 'cancelled', 'paid', 'shipped', 'delivered'],
+  hold: ['disputed', 'refunded', 'cancelled', 'paid', 'shipped', 'delivered'],
+  payout_sent: ['completed', 'auto_completed', 'disputed', 'hold'],
+  completed: ['delivered', 'shipped', 'paid', 'disputed'],
+  auto_completed: ['delivered', 'shipped', 'disputed'],
+  refunded: [],
+  cancelled: [],
+  payout_confirmed: [],
+}
+
+export function transitionRequiresNote(from: EscrowStatus, to: EscrowStatus): boolean {
+  return transitionsRequiringNote[from]?.includes(to) ?? false
+}
+
 export const CHECK_NAME_CS: Record<string, string> = {
   tracking_exists: 'Tracking číslo existuje',
   tracking_active: 'Zásilka je aktivní',
