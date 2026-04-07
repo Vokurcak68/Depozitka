@@ -755,7 +755,14 @@ function App() {
     } as never)
     console.log('[DEBUG] dpt_debug_change_status:', debugRes)
     const debugText = JSON.stringify(debugRes.data || debugRes.error, null, 2)
-    alert('DEBUG dpt_debug_change_status:\n\n' + debugText)
+    // Vytvoř copy-friendly modal
+    try {
+      await navigator.clipboard.writeText(debugText)
+      notify('success', 'DEBUG zkopírováno do clipboardu! Vlož sem (Ctrl+V).')
+    } catch {
+      // fallback: prompt umožňuje označit a zkopírovat text
+      window.prompt('DEBUG dpt_debug_change_status (Ctrl+C):', debugText)
+    }
 
     const { error } = await supabase.rpc('dpt_change_status', {
       p_transaction_code: tx.transactionCode,
