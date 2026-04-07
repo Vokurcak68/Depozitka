@@ -179,7 +179,7 @@ export function TxDrawer({
           onSaved={() => onRefresh?.()}
         />
 
-        {(tx.status === 'completed' || tx.status === 'auto_completed') && tx.sellerPayoutIban && onPayout && (
+        {(tx.status === 'delivered' || tx.status === 'completed' || tx.status === 'auto_completed') && tx.sellerPayoutIban && onPayout && (
           <div className="drawerSection">
             <h4>💸 Výplata prodávajícímu</h4>
             <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '10px', padding: '14px', marginBottom: '8px' }}>
