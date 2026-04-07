@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { Transaction } from '../lib/types'
 import { formatPrice } from '../lib/utils'
+import { supabase } from '../lib/supabase'
 
 type RecipientType = 'buyer' | 'seller' | 'platform_fee'
 
@@ -8,7 +9,7 @@ interface PayoutItemDraft {
   id: string // local UUID
   recipient_type: RecipientType
   recipient_name: string
-  recipient_iban: string
+  recipient_account: string // CZ formát "1234567890/0100" nebo IBAN
   amount_czk: string
   variable_symbol: string
   note: string
@@ -26,7 +27,11 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
 
-function emptyItem(type: RecipientType, tx: Transaction): PayoutItemDraft {
+function emptyItem(
+  type: RecipientType,
+  tx: Transaction,
+  buyerAccount: string = '',
+): PayoutItemDraft {
   return {
     id: uid(),
     recipient_type: type,
@@ -36,7 +41,12 @@ function emptyItem(type: RecipientType, tx: Transaction): PayoutItemDraft {
         : type === 'seller'
           ? tx.sellerName || ''
           : 'Lokopolis (provize)',
-    recipient_iban: type === 'seller' ? tx.sellerPayoutIban || '' : '',
+    recipient_account:
+      type === 'seller'
+        ? tx.sellerPayoutIban || ''
+        : type === 'buyer'
+          ? buyerAccount
+          : '',
     amount_czk: '',
     variable_symbol: '',
     note: '',
@@ -50,12 +60,49 @@ export function DisputeResolutionPanel({
   adminEmail,
   onSuccess,
 }: Props) {
-  const [items, setItems] = useState<PayoutItemDraft[]>([
-    emptyItem('buyer', tx),
-  ])
+  const [buyerAccount, setBuyerAccount] = useState<string>('')
+  const [items, setItems] = useState<PayoutItemDraft[]>([emptyItem('buyer', tx)])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
+
+  // Při mountu najdi protiúčet kupujícího z dpt_bank_transactions (poslední matching platba)
+  useEffect(() => {
+    let cancelled = false
+    async function loadBuyerAccount() {
+      const { data, error: err } = await supabase
+        .from('dpt_bank_transactions')
+        .select('counter_account, date')
+        .eq('matched_transaction_id', tx.id)
+        .eq('matched', true)
+        .order('date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (cancelled) return
+      if (err) {
+        console.error('[DisputeResolutionPanel] buyer account lookup:', err)
+        return
+      }
+      const account = data?.counter_account || ''
+      if (account) {
+        setBuyerAccount(account)
+        // Pokud má první item typ 'buyer' a prázdný účet → předvyplň
+        setItems((prev) =>
+          prev.map((it, idx) =>
+            idx === 0 && it.recipient_type === 'buyer' && !it.recipient_account
+              ? { ...it, recipient_account: account }
+              : it,
+          ),
+        )
+      }
+    }
+    void loadBuyerAccount()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tx.id])
 
   const totalDeposit = Number(tx.amountCzk) || 0
 
@@ -80,14 +127,14 @@ export function DisputeResolutionPanel({
   }
 
   function addItem(type: RecipientType) {
-    setItems((prev) => [...prev, emptyItem(type, tx)])
+    setItems((prev) => [...prev, emptyItem(type, tx, buyerAccount)])
   }
 
   // Presety
   function presetFullRefundBuyer() {
     setItems([
       {
-        ...emptyItem('buyer', tx),
+        ...emptyItem('buyer', tx, buyerAccount),
         amount_czk: depositRounded.toFixed(2),
         note: 'Plný refund kupujícímu',
       },
@@ -99,12 +146,12 @@ export function DisputeResolutionPanel({
     const refund = depositRounded - fee
     setItems([
       {
-        ...emptyItem('buyer', tx),
+        ...emptyItem('buyer', tx, buyerAccount),
         amount_czk: refund.toFixed(2),
         note: 'Refund mínus 5 % provize',
       },
       {
-        ...emptyItem('platform_fee', tx),
+        ...emptyItem('platform_fee', tx, buyerAccount),
         amount_czk: fee.toFixed(2),
         note: 'Provize za vyřízení sporu',
       },
@@ -115,13 +162,21 @@ export function DisputeResolutionPanel({
     const half = Math.round((depositRounded / 2) * 100) / 100
     const other = depositRounded - half
     setItems([
-      { ...emptyItem('buyer', tx), amount_czk: half.toFixed(2), note: 'Split 50%' },
-      { ...emptyItem('seller', tx), amount_czk: other.toFixed(2), note: 'Split 50%' },
+      {
+        ...emptyItem('buyer', tx, buyerAccount),
+        amount_czk: half.toFixed(2),
+        note: 'Split 50%',
+      },
+      {
+        ...emptyItem('seller', tx, buyerAccount),
+        amount_czk: other.toFixed(2),
+        note: 'Split 50%',
+      },
     ])
   }
 
   function presetCustom() {
-    setItems([emptyItem('buyer', tx), emptyItem('seller', tx)])
+    setItems([emptyItem('buyer', tx, buyerAccount), emptyItem('seller', tx, buyerAccount)])
   }
 
   async function handleSubmit() {
@@ -142,8 +197,19 @@ export function DisputeResolutionPanel({
         setError(`Item "${it.recipient_type}" má nulovou nebo neplatnou částku.`)
         return
       }
-      if (it.recipient_type !== 'platform_fee' && !it.recipient_iban.trim()) {
-        setError(`Item "${it.recipient_type}" musí mít IBAN.`)
+      if (it.recipient_type !== 'platform_fee' && !it.recipient_account.trim()) {
+        setError(`Item "${it.recipient_type}" musí mít číslo účtu.`)
+        return
+      }
+      if (
+        it.recipient_type !== 'platform_fee' &&
+        !/^(\d[\d-]*\/\d{4}|CZ\d{22}|CZ\d{2}\s?(\d{4}\s?){5})$/.test(
+          it.recipient_account.trim().replace(/\s/g, ''),
+        )
+      ) {
+        setError(
+          `Item "${it.recipient_type}": neplatný formát účtu. Použij "1234567890/0100" nebo IBAN (CZ...).`,
+        )
         return
       }
     }
@@ -165,7 +231,7 @@ export function DisputeResolutionPanel({
         items: items.map((it) => ({
           recipient_type: it.recipient_type,
           recipient_name: it.recipient_name || null,
-          recipient_iban: it.recipient_iban.trim() || null,
+          recipient_account: it.recipient_account.trim() || null,
           amount_czk: parseFloat(it.amount_czk.replace(',', '.')),
           variable_symbol: it.variable_symbol || null,
           note: it.note || null,
@@ -208,6 +274,18 @@ export function DisputeResolutionPanel({
         Rozepiš výplaty mezi kupujícího, prodávajícího a platformu. Součet musí přesně sedět na
         depozit ({formatPrice(totalDeposit)}).
       </p>
+      {buyerAccount && (
+        <p
+          className="hint"
+          style={{
+            marginBottom: 8,
+            color: '#22c55e',
+            fontSize: 12,
+          }}
+        >
+          ℹ️ Účet kupujícího předvyplněn z platby: <strong>{buyerAccount}</strong>
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
         <button className="btn btnSecondary" onClick={presetFullRefundBuyer} disabled={busy}>
@@ -268,9 +346,9 @@ export function DisputeResolutionPanel({
             />
             {it.recipient_type !== 'platform_fee' && (
               <input
-                value={it.recipient_iban}
-                onChange={(e) => updateItem(it.id, { recipient_iban: e.target.value })}
-                placeholder="IBAN (CZ...)"
+                value={it.recipient_account}
+                onChange={(e) => updateItem(it.id, { recipient_account: e.target.value })}
+                placeholder="Číslo účtu (např. 1234567890/0100)"
                 disabled={busy}
               />
             )}
