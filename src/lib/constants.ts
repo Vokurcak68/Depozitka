@@ -23,17 +23,19 @@ export const quickFilterLabel: Record<QuickFilter, string> = {
   closed: 'Ukončeno',
 }
 
+// Forward (normální flow) + rollback (admin korekce)
+// Rollback přechody jsou v DB (migrace 037) reason_required=true.
 export const allowedTransitions: Record<EscrowStatus, EscrowStatus[]> = {
   created: ['partial_paid', 'paid', 'cancelled'],
-  partial_paid: ['paid', 'cancelled'],
-  paid: ['shipped', 'disputed', 'hold', 'refunded'],
-  shipped: ['delivered', 'disputed', 'hold'],
-  delivered: ['completed', 'auto_completed', 'disputed', 'hold'],
-  disputed: ['hold', 'refunded', 'payout_sent', 'cancelled'],
-  hold: ['disputed', 'refunded', 'payout_sent', 'cancelled'],
-  payout_sent: ['payout_confirmed'],
-  completed: ['payout_sent'],
-  auto_completed: ['payout_sent'],
+  partial_paid: ['paid', 'cancelled', 'created'],
+  paid: ['shipped', 'disputed', 'hold', 'refunded', 'partial_paid', 'created'],
+  shipped: ['delivered', 'disputed', 'hold', 'paid'],
+  delivered: ['completed', 'auto_completed', 'disputed', 'hold', 'shipped', 'paid'],
+  disputed: ['hold', 'refunded', 'payout_sent', 'cancelled', 'paid', 'shipped', 'delivered'],
+  hold: ['disputed', 'refunded', 'payout_sent', 'cancelled', 'paid', 'shipped', 'delivered'],
+  payout_sent: ['payout_confirmed', 'completed', 'auto_completed', 'disputed', 'hold'],
+  completed: ['payout_sent', 'delivered', 'shipped', 'paid', 'disputed'],
+  auto_completed: ['payout_sent', 'delivered', 'shipped', 'disputed'],
   refunded: [],
   cancelled: [],
   payout_confirmed: [],
