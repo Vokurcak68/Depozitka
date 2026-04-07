@@ -747,6 +747,17 @@ function App() {
       }
     }
 
+    // DEBUG: log auth context před RPC voláním
+    const { data: sessionData } = await supabase.auth.getSession()
+    console.log('[dpt_change_status] auth session:', {
+      user_id: sessionData.session?.user?.id,
+      email: sessionData.session?.user?.email,
+      access_token_prefix: sessionData.session?.access_token?.slice(0, 20),
+      sessionEmail,
+    })
+    const debugRole = await supabase.rpc('dpt_current_role' as never)
+    console.log('[dpt_change_status] dpt_current_role():', debugRole)
+
     const { error } = await supabase.rpc('dpt_change_status', {
       p_transaction_code: tx.transactionCode,
       p_new_status: targetStatus,
