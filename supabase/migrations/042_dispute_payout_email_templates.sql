@@ -8,31 +8,22 @@ VALUES
   ('dispute_payout_seller', 'Vypořádání sporu (prodávající)', 'Informace o vyplacené částce ze sporu')
 ON CONFLICT (key) DO NOTHING;
 
--- 2) Šablony obsahu
-INSERT INTO public.dpt_email_templates (template_key, subject_template, body_template, enabled)
+-- 2) Šablony obsahu (sloupec 'enabled' má default true, nevyplňujeme ho)
+INSERT INTO public.dpt_email_templates (template_key, subject_template, body_template)
 VALUES
   (
     'dispute_payout_buyer',
-    'Vypořádání sporu — transakce {{transaction_code}}',
-    E'Dobrý den {{buyer_name}},\n\n' ||
-    E'admin vypořádal spor u transakce {{transaction_code}}.\n\n' ||
-    E'Vámi obdržená částka byla odeslána na Váš účet.\n' ||
-    E'Detaily najdete v Lokopolis Bazar v sekci Bezpečná platba.\n\n' ||
-    E'V případě dotazů pište na info@lokopolis.cz.\n\n' ||
-    E'S pozdravem,\nLokopolis Bazar'
+    'Depozitka: Vypořádání sporu ({{transaction_code}})',
+    'Dobrý den {{buyer_name}}, admin vypořádal spor u transakce {{transaction_code}}. Vámi obdržená částka byla odeslána na Váš účet. Detaily najdete v Lokopolis Bazar v sekci Bezpečná platba.'
   ),
   (
     'dispute_payout_seller',
-    'Vypořádání sporu — transakce {{transaction_code}}',
-    E'Dobrý den {{seller_name}},\n\n' ||
-    E'admin vypořádal spor u transakce {{transaction_code}}.\n\n' ||
-    E'Vámi obdržená částka byla odeslána na Váš účet (pokud Vám byla přiznána).\n' ||
-    E'Detaily najdete v Lokopolis Bazar v sekci Bezpečná platba.\n\n' ||
-    E'V případě dotazů pište na info@lokopolis.cz.\n\n' ||
-    E'S pozdravem,\nLokopolis Bazar'
+    'Depozitka: Vypořádání sporu ({{transaction_code}})',
+    'Dobrý den {{seller_name}}, admin vypořádal spor u transakce {{transaction_code}}. Vámi obdržená částka byla odeslána na Váš účet (pokud Vám byla přiznána). Detaily najdete v Lokopolis Bazar v sekci Bezpečná platba.'
   )
 ON CONFLICT (template_key) DO UPDATE
 SET
   subject_template = EXCLUDED.subject_template,
   body_template = EXCLUDED.body_template,
-  enabled = EXCLUDED.enabled;
+  enabled = true,
+  updated_at = now();
