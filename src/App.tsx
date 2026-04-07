@@ -46,12 +46,13 @@ import { TxDrawer } from './components/TxDrawer'
 import { ConfirmModal } from './components/ConfirmModal'
 import { EmailLogTab } from './components/EmailLogTab'
 import { PayoutLogTab } from './components/PayoutLogTab'
+import { CronTab } from './components/CronTab'
 import { MarketplaceTab } from './components/MarketplaceTab'
 import { SellerFallbackTab } from './components/SellerFallbackTab'
 import { BankTab } from './components/BankTab'
 
 function App() {
-  const [tab, setTab] = useState<'dashboard' | 'emails' | 'payouts' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'emails' | 'payouts' | 'cron' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [userRole, setUserRole] = useState<UserRole>('unknown')
   const [password, setPassword] = useState('')
@@ -1072,6 +1073,11 @@ function App() {
                 </button>
               )}
               {canUseAdminTabs(userRole) && (
+                <button className={tab === 'cron' ? 'active' : ''} onClick={() => setTab('cron')}>
+                  🔧 Cron
+                </button>
+              )}
+              {canUseAdminTabs(userRole) && (
                 <>
                   <button className={tab === 'marketplaces' ? 'active' : ''} onClick={() => setTab('marketplaces')}>
                     Marketplaces
@@ -1161,6 +1167,10 @@ function App() {
                 }
               }}
             />
+          )}
+
+          {canUseAdminTabs(userRole) && tab === 'cron' && (
+            <CronTab notify={notify} />
           )}
 
           {canUseAdminTabs(userRole) && tab === 'marketplaces' && (
