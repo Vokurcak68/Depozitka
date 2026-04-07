@@ -1168,6 +1168,7 @@ function App() {
           onTrackingNumber={(value) => setTrackingNumber((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onSendManualEmail={() => void sendManualEmailForTx(selectedTx)}
           onPayout={() => void handlePayout(selectedTx)}
+          onRefresh={() => void reloadAll()}
         />
       )}
 

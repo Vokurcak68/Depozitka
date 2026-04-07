@@ -2,6 +2,7 @@ import type { EscrowStatus, Transaction, TxEvent } from '../lib/types'
 import { statusLabel, allowedTransitions } from '../lib/constants'
 import { formatPrice, formatDate, maskIban, payoutSourceLabel } from '../lib/utils'
 import { ShieldTrackPanel } from './ShieldTrackPanel'
+import { PayoutAccountEditor } from './PayoutAccountEditor'
 
 export function TxDrawer({
   tx,
@@ -20,6 +21,7 @@ export function TxDrawer({
   onApply,
   onSendManualEmail,
   onPayout,
+  onRefresh,
 }: {
   tx: Transaction
   events: TxEvent[]
@@ -37,6 +39,7 @@ export function TxDrawer({
   onApply: () => void
   onSendManualEmail: () => void
   onPayout?: () => void
+  onRefresh?: () => void
 }) {
   const nextOptions = allowedTransitions[tx.status]
 
@@ -167,6 +170,14 @@ export function TxDrawer({
             </div>
           </div>
         </div>
+
+        <PayoutAccountEditor
+          transactionId={tx.id}
+          currentIban={tx.sellerPayoutIban}
+          currentName={tx.sellerPayoutAccountName}
+          locked={!!tx.sellerPayoutLockedAt}
+          onSaved={() => onRefresh?.()}
+        />
 
         {(tx.status === 'completed' || tx.status === 'auto_completed') && tx.sellerPayoutIban && onPayout && (
           <div className="drawerSection">
