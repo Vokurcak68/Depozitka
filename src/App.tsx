@@ -1234,6 +1234,9 @@ function App() {
           note={statusNote[selectedTx.id] || ''}
           emailBusy={Boolean(manualEmailBusy[selectedTx.id])}
           payoutBusy={Boolean(payoutBusy[selectedTx.id])}
+          engineUrl={(import.meta.env.VITE_ENGINE_URL || '').trim()}
+          cronToken={(import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()}
+          adminEmail={sessionEmail}
           onClose={() => setSelectedTx(null)}
           onChange={(value) => setStatusChange((prev) => ({ ...prev, [selectedTx.id]: value }))}
           onNote={(value) => setStatusNote((prev) => ({ ...prev, [selectedTx.id]: value }))}

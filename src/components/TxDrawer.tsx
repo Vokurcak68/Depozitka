@@ -3,6 +3,7 @@ import { statusLabel, allowedTransitions, transitionRequiresNote } from '../lib/
 import { formatPrice, formatDate, maskIban, payoutSourceLabel } from '../lib/utils'
 import { ShieldTrackPanel } from './ShieldTrackPanel'
 import { PayoutAccountEditor } from './PayoutAccountEditor'
+import { DisputeResolutionPanel } from './DisputeResolutionPanel'
 
 export function TxDrawer({
   tx,
@@ -13,6 +14,9 @@ export function TxDrawer({
   trackingNum = '',
   emailBusy = false,
   payoutBusy = false,
+  engineUrl = '',
+  cronToken = '',
+  adminEmail = '',
   onClose,
   onChange,
   onNote,
@@ -31,6 +35,9 @@ export function TxDrawer({
   trackingNum?: string
   emailBusy?: boolean
   payoutBusy?: boolean
+  engineUrl?: string
+  cronToken?: string
+  adminEmail?: string
   onClose: () => void
   onChange: (value: EscrowStatus | '') => void
   onNote: (value: string) => void
@@ -194,6 +201,16 @@ export function TxDrawer({
           locked={!!tx.sellerPayoutLockedAt}
           onSaved={() => onRefresh?.()}
         />
+
+        {tx.status === 'disputed' && engineUrl && cronToken && (
+          <DisputeResolutionPanel
+            tx={tx}
+            engineUrl={engineUrl}
+            cronToken={cronToken}
+            adminEmail={adminEmail}
+            onSuccess={() => onRefresh?.()}
+          />
+        )}
 
         {(tx.status === 'delivered' || tx.status === 'completed' || tx.status === 'auto_completed') && tx.sellerPayoutIban && onPayout && (
           <div className="drawerSection">
