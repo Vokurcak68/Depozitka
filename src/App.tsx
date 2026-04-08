@@ -48,11 +48,12 @@ import { EmailLogTab } from './components/EmailLogTab'
 import { PayoutLogTab } from './components/PayoutLogTab'
 import { CronTab } from './components/CronTab'
 import { MarketplaceTab } from './components/MarketplaceTab'
+import { OperatorTab } from './components/OperatorTab'
 import { SellerFallbackTab } from './components/SellerFallbackTab'
 import { BankTab } from './components/BankTab'
 
 function App() {
-  const [tab, setTab] = useState<'dashboard' | 'emails' | 'payouts' | 'cron' | 'marketplaces' | 'seller-fallback' | 'bank'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'emails' | 'payouts' | 'cron' | 'marketplaces' | 'operator' | 'seller-fallback' | 'bank'>('dashboard')
   const [sessionEmail, setSessionEmail] = useState('')
   const [userRole, setUserRole] = useState<UserRole>('unknown')
   const [password, setPassword] = useState('')
@@ -1082,6 +1083,9 @@ function App() {
                   <button className={tab === 'marketplaces' ? 'active' : ''} onClick={() => setTab('marketplaces')}>
                     Marketplaces
                   </button>
+                  <button className={tab === 'operator' ? 'active' : ''} onClick={() => setTab('operator')}>
+                    Provozovatel
+                  </button>
                   <button className={tab === 'seller-fallback' ? 'active' : ''} onClick={() => setTab('seller-fallback')}>
                     Seller payout
                   </button>
@@ -1193,6 +1197,10 @@ function App() {
               onGeneratedKeyChange={setGeneratedKey}
               notify={notify}
             />
+          )}
+
+          {canUseAdminTabs(userRole) && tab === 'operator' && (
+            <OperatorTab notify={notify} />
           )}
 
           {canUseAdminTabs(userRole) && tab === 'seller-fallback' && (
