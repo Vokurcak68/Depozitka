@@ -35,6 +35,9 @@ export function CronTab({ notify }: Props) {
   const [runs, setRuns] = useState<CronRun[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [txCode, setTxCode] = useState('')
+  const [txDiagBusy, setTxDiagBusy] = useState(false)
+  const [txDiagResult, setTxDiagResult] = useState<unknown>(null)
 
   async function loadRuns(): Promise<void> {
     setLoading(true)
@@ -85,6 +88,44 @@ export function CronTab({ notify }: Props) {
     }
   }
 
+  async function runTxEmailDiag(): Promise<void> {
+    const code = txCode.trim()
+    if (!code) {
+      notify('error', 'Zadej kód transakce (např. DPT-2026-762149).')
+      return
+    }
+
+    setTxDiagBusy(true)
+    setTxDiagResult(null)
+
+    try {
+      const base = (import.meta.env.VITE_ENGINE_URL || '').trim()
+      const token = (import.meta.env.VITE_ENGINE_MANUAL_TRIGGER_TOKEN || '').trim()
+      if (!base || !token) {
+        notify('error', 'VITE_ENGINE_URL nebo VITE_ENGINE_MANUAL_TRIGGER_TOKEN není nastaven.')
+        return
+      }
+
+      const url = `${base.replace(/\/$/, '')}/api/diag/tx-email?code=${encodeURIComponent(code)}`
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        notify('error', `Diagnostika selhala: ${data.error || res.status}`)
+        setTxDiagResult(data)
+      } else {
+        notify('success', `Diagnostika hotová pro ${code}`)
+        setTxDiagResult(data)
+      }
+    } catch (err) {
+      notify('error', `Diagnostika selhala: ${err instanceof Error ? err.message : 'Neznámá chyba'}`)
+    } finally {
+      setTxDiagBusy(false)
+    }
+  }
+
   const lastByJob = new Map<string, CronRun>()
   for (const r of runs) {
     if (!lastByJob.has(r.job_name)) {
@@ -103,6 +144,50 @@ export function CronTab({ notify }: Props) {
         <button className="btn btnSecondary" onClick={() => void loadRuns()}>
           🔄 Reload historie
         </button>
+      </div>
+
+      <div
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+        }}
+      >
+        <h3 style={{ marginTop: 0 }}>Diagnostika konkrétní transakce (emaily)</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Zadej kód transakce a Core samo zavolá engine endpoint <code>/api/diag/tx-email</code> s tokenem z env.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <input
+            value={txCode}
+            onChange={(e) => setTxCode(e.target.value)}
+            placeholder="DPT-2026-762149"
+            style={{ minWidth: 260 }}
+          />
+          <button className="btn btnSecondary" onClick={() => void runTxEmailDiag()} disabled={txDiagBusy}>
+            {txDiagBusy ? 'Načítám…' : '🔎 Načíst diagnostiku'}
+          </button>
+        </div>
+
+        {txDiagResult ? (
+          <pre
+            style={{
+              margin: 0,
+              padding: 10,
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: 'var(--surface-2)',
+              maxHeight: 320,
+              overflow: 'auto',
+              fontSize: 12,
+            }}
+          >
+            {JSON.stringify(txDiagResult, null, 2)}
+          </pre>
+        ) : (
+          <p className="muted" style={{ marginBottom: 0 }}>Výsledek se zobrazí tady jako JSON.</p>
+        )}
       </div>
 
       <h3>Konfigurované cron jobs</h3>
