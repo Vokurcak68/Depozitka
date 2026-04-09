@@ -47,12 +47,12 @@ BEGIN
       q.subject,
       LEFT(COALESCE(q.text_body, q.html_body, ''), 400) AS body_preview,
       'smtp'::text AS provider,
-      CASE
+      (CASE
         WHEN q.status = 'pending' THEN 'queued'
         WHEN q.status = 'sent' THEN 'sent'
         WHEN q.status = 'failed' THEN 'failed'
         ELSE 'failed'
-      END AS status,
+      END)::dpt_email_status AS status,
       q.last_error AS error_message,
       q.sent_at,
       COALESCE(q.created_at, NOW()) AS created_at
