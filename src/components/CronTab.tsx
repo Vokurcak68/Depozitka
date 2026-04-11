@@ -22,14 +22,39 @@ interface Props {
   notify: Notify
 }
 
+interface CronSettings {
+  dailyJobsTimesUtc: string[]
+}
+
+const DEFAULT_CRON_SETTINGS: CronSettings = {
+  dailyJobsTimesUtc: ['08:00'],
+}
+
 const CONFIGURED = [
   {
     name: 'daily-jobs',
-    schedule: '0 8 * * * (každý den 8:00 UTC)',
-    description: 'Master orchestrator: spustí fio-sync + process-emails. Vercel Hobby plán umožňuje jen 1 cron, takže všechno běží v rámci tohoto.',
+    description: 'Master orchestrator: spustí fio-sync + process-emails. Na Hobby běží jen 1x denně, na placeném Vercelu můžeš přidat další časy.',
     subJobs: ['fio-sync', 'process-emails'],
   },
 ]
+
+function isValidUtcTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value)
+}
+
+function normalizeTimes(values: string[]): string[] {
+  const out = values
+    .map((v) => v.trim())
+    .filter((v) => isValidUtcTime(v))
+    .sort((a, b) => a.localeCompare(b))
+
+  return Array.from(new Set(out))
+}
+
+function toCronExpr(timeUtc: string): string {
+  const [h, m] = timeUtc.split(':')
+  return `${m} ${h} * * *`
+}
 
 export function CronTab({ notify }: Props) {
   const [runs, setRuns] = useState<CronRun[]>([])
@@ -38,6 +63,8 @@ export function CronTab({ notify }: Props) {
   const [txCode, setTxCode] = useState('')
   const [txDiagBusy, setTxDiagBusy] = useState(false)
   const [txDiagResult, setTxDiagResult] = useState<unknown>(null)
+  const [cronSettings, setCronSettings] = useState<CronSettings>(DEFAULT_CRON_SETTINGS)
+  const [settingsBusy, setSettingsBusy] = useState(false)
 
   async function loadRuns(): Promise<void> {
     setLoading(true)
@@ -58,7 +85,67 @@ export function CronTab({ notify }: Props) {
 
   useEffect(() => {
     void loadRuns()
+    void loadCronSettings()
   }, [])
+
+  async function loadCronSettings(): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('dpt_settings')
+        .select('value')
+        .eq('key', 'cron')
+        .maybeSingle()
+
+      if (error) {
+        notify('error', `Načtení cron nastavení: ${error.message}`)
+        return
+      }
+
+      const incoming = (data?.value || {}) as Partial<CronSettings>
+      const normalized = normalizeTimes(incoming.dailyJobsTimesUtc || DEFAULT_CRON_SETTINGS.dailyJobsTimesUtc)
+      setCronSettings({
+        dailyJobsTimesUtc: normalized.length > 0 ? normalized : DEFAULT_CRON_SETTINGS.dailyJobsTimesUtc,
+      })
+    } catch (err) {
+      notify('error', `Načtení cron nastavení: ${err instanceof Error ? err.message : 'Neznámá chyba'}`)
+    }
+  }
+
+  async function saveCronSettings(): Promise<void> {
+    const normalized = normalizeTimes(cronSettings.dailyJobsTimesUtc)
+
+    if (normalized.length === 0) {
+      notify('error', 'Zadej aspoň jeden validní čas ve formátu HH:MM (UTC).')
+      return
+    }
+
+    setSettingsBusy(true)
+    try {
+      const payload: CronSettings = { dailyJobsTimesUtc: normalized }
+      const { error } = await supabase
+        .from('dpt_settings')
+        .upsert(
+          {
+            key: 'cron',
+            value: payload,
+            description: 'Konfigurace plánovaných časů cronu daily-jobs (UTC) pro Vercel cron schedule.',
+          },
+          { onConflict: 'key' },
+        )
+
+      if (error) {
+        notify('error', `Uložení cron nastavení: ${error.message}`)
+        return
+      }
+
+      setCronSettings(payload)
+      notify('success', 'Cron časy uloženy ✅')
+    } catch (err) {
+      notify('error', `Uložení cron nastavení: ${err instanceof Error ? err.message : 'Neznámá chyba'}`)
+    } finally {
+      setSettingsBusy(false)
+    }
+  }
 
   async function triggerNow(): Promise<void> {
     if (!confirm('Opravdu spustit daily-jobs teď?')) return
@@ -127,6 +214,7 @@ export function CronTab({ notify }: Props) {
   }
 
   const lastByJob = new Map<string, CronRun>()
+  const scheduledTimes = normalizeTimes(cronSettings.dailyJobsTimesUtc)
   for (const r of runs) {
     if (!lastByJob.has(r.job_name)) {
       lastByJob.set(r.job_name, r)
@@ -190,6 +278,77 @@ export function CronTab({ notify }: Props) {
         )}
       </div>
 
+      <h3>Plánování cronu (UTC)</h3>
+      <div
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+        }}
+      >
+        <p style={{ marginTop: 0, fontSize: 13 }}>
+          Tady si nadefinuješ víc časů pro stejný cron <code>daily-jobs</code>. Na Vercel Hobby typicky běží jen 1x,
+          na placeném tarifu můžeš přidat další. Časy jsou v <strong>UTC</strong>.
+        </p>
+
+        <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+          {cronSettings.dailyJobsTimesUtc.map((time, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={time}
+                onChange={(e) => {
+                  const next = [...cronSettings.dailyJobsTimesUtc]
+                  next[idx] = e.target.value
+                  setCronSettings({ ...cronSettings, dailyJobsTimesUtc: next })
+                }}
+                placeholder="08:00"
+                style={{ width: 120 }}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                cron: {isValidUtcTime(time) ? toCronExpr(time) : 'invalid'}
+              </span>
+              {cronSettings.dailyJobsTimesUtc.length > 1 && (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    const next = cronSettings.dailyJobsTimesUtc.filter((_, i) => i !== idx)
+                    setCronSettings({
+                      ...cronSettings,
+                      dailyJobsTimesUtc: next.length ? next : ['08:00'],
+                    })
+                  }}
+                >
+                  Smazat
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btnSecondary"
+            onClick={() => setCronSettings({ ...cronSettings, dailyJobsTimesUtc: [...cronSettings.dailyJobsTimesUtc, ''] })}
+          >
+            ➕ Přidat čas
+          </button>
+          <button type="button" className="btn btnPrimary" onClick={() => void saveCronSettings()} disabled={settingsBusy}>
+            {settingsBusy ? 'Ukládám…' : '💾 Uložit časy'}
+          </button>
+          <button type="button" className="btn" onClick={() => void loadCronSettings()} disabled={settingsBusy}>
+            Načíst z DB
+          </button>
+        </div>
+
+        <div style={{ marginTop: 12, fontSize: 12 }}>
+          <div className="muted">Plánované časy: {scheduledTimes.join(', ') || '-'}</div>
+          <div className="muted">Cron výrazy: {scheduledTimes.map(toCronExpr).join(' | ') || '-'}</div>
+        </div>
+      </div>
+
       <h3>Konfigurované cron jobs</h3>
       <div style={{ marginBottom: 24 }}>
         {CONFIGURED.map((cfg) => {
@@ -208,7 +367,9 @@ export function CronTab({ notify }: Props) {
                 <div>
                   <strong>{cfg.name}</strong>
                   <p className="muted" style={{ margin: '4px 0', fontSize: 13 }}>
-                    {cfg.schedule}
+                    {scheduledTimes.length
+                      ? `${scheduledTimes.join(', ')} UTC (${scheduledTimes.map(toCronExpr).join(' | ')})`
+                      : 'Bez naplánovaných časů'}
                   </p>
                   <p style={{ margin: '4px 0', fontSize: 13 }}>{cfg.description}</p>
                   <p className="muted" style={{ margin: '4px 0', fontSize: 12 }}>
