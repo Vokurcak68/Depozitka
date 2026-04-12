@@ -4,6 +4,10 @@ import { supabase } from '../lib/supabase'
 interface MonitorSettings {
   alertEmails?: string[]
   reminderMinutes?: number
+  pushoverEnabled?: boolean
+  pushoverUserKeys?: string[]
+  pushoverPriority?: number
+  pushoverSound?: string
 }
 
 interface Props {
@@ -12,17 +16,25 @@ interface Props {
 
 const DEFAULT_REMINDER_MINUTES = 60
 
-function parseEmails(input: string): string[] {
+function parseLines(input: string, lower = false): string[] {
   const normalized = input
     .split(/[\n,;]+/g)
-    .map((v) => v.trim().toLowerCase())
+    .map((v) => (lower ? v.trim().toLowerCase() : v.trim()))
     .filter((v) => v.length > 0)
 
   return Array.from(new Set(normalized))
 }
 
+function parseEmails(input: string): string[] {
+  return parseLines(input, true)
+}
+
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function isValidPushoverUserKey(value: string): boolean {
+  return /^[A-Za-z0-9]{20,}$/.test(value)
 }
 
 export function AlertingTab({ notify }: Props) {
@@ -30,6 +42,10 @@ export function AlertingTab({ notify }: Props) {
   const [saving, setSaving] = useState(false)
   const [emailsInput, setEmailsInput] = useState('')
   const [reminderMinutes, setReminderMinutes] = useState<number>(DEFAULT_REMINDER_MINUTES)
+  const [pushoverEnabled, setPushoverEnabled] = useState(false)
+  const [pushoverUsersInput, setPushoverUsersInput] = useState('')
+  const [pushoverPriority, setPushoverPriority] = useState<number>(1)
+  const [pushoverSound, setPushoverSound] = useState<string>('')
 
   useEffect(() => {
     void load()
@@ -55,6 +71,10 @@ export function AlertingTab({ notify }: Props) {
           ? Number(value.reminderMinutes)
           : DEFAULT_REMINDER_MINUTES,
       )
+      setPushoverEnabled(value.pushoverEnabled === true)
+      setPushoverUsersInput(Array.isArray(value.pushoverUserKeys) ? value.pushoverUserKeys.join('\n') : '')
+      setPushoverPriority(Number.isFinite(Number(value.pushoverPriority)) ? Number(value.pushoverPriority) : 1)
+      setPushoverSound(typeof value.pushoverSound === 'string' ? value.pushoverSound : '')
     } catch (err) {
       notify('error', `Načtení monitor alertů selhalo: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -64,6 +84,11 @@ export function AlertingTab({ notify }: Props) {
 
   const parsedEmails = useMemo(() => parseEmails(emailsInput), [emailsInput])
   const invalidEmails = useMemo(() => parsedEmails.filter((e) => !isValidEmail(e)), [parsedEmails])
+  const parsedPushoverUsers = useMemo(() => parseLines(pushoverUsersInput), [pushoverUsersInput])
+  const invalidPushoverUsers = useMemo(
+    () => parsedPushoverUsers.filter((e) => !isValidPushoverUserKey(e)),
+    [parsedPushoverUsers],
+  )
 
   async function save(): Promise<void> {
     if (invalidEmails.length > 0) {
@@ -76,11 +101,25 @@ export function AlertingTab({ notify }: Props) {
       return
     }
 
+    if (pushoverEnabled && invalidPushoverUsers.length > 0) {
+      notify('error', `Neplatné Pushover User Key: ${invalidPushoverUsers.join(', ')}`)
+      return
+    }
+
+    if (!Number.isFinite(pushoverPriority) || pushoverPriority < -2 || pushoverPriority > 2) {
+      notify('error', 'Pushover priority musí být mezi -2 a 2.')
+      return
+    }
+
     setSaving(true)
     try {
       const payload: MonitorSettings = {
         alertEmails: parsedEmails,
         reminderMinutes: Math.round(reminderMinutes),
+        pushoverEnabled,
+        pushoverUserKeys: parsedPushoverUsers,
+        pushoverPriority: Math.round(pushoverPriority),
+        pushoverSound: pushoverSound.trim() || undefined,
       }
 
       const { error } = await supabase
@@ -117,7 +156,7 @@ export function AlertingTab({ notify }: Props) {
     <section className="panel">
       <h2>📣 Monitoring alerty</h2>
       <p className="muted" style={{ marginTop: 4 }}>
-        Nastavení pro emailová upozornění z monitoringu (incident open / reminder / resolved).
+        Nastavení pro upozornění z monitoringu (email + volitelně Pushover push na iPhone).
       </p>
 
       <div className="formGrid" style={{ marginTop: 16 }}>
@@ -143,11 +182,54 @@ export function AlertingTab({ notify }: Props) {
             onChange={(e) => setReminderMinutes(Number(e.target.value) || DEFAULT_REMINDER_MINUTES)}
           />
         </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox" checked={pushoverEnabled} onChange={(e) => setPushoverEnabled(e.target.checked)} />
+          Zapnout Pushover push alerty
+        </label>
+
+        <label>
+          Pushover priority (-2 až 2)
+          <input
+            type="number"
+            min={-2}
+            max={2}
+            value={pushoverPriority}
+            onChange={(e) => setPushoverPriority(Number(e.target.value) || 0)}
+          />
+        </label>
+
+        <label>
+          Pushover sound <span className="muted">(volitelné)</span>
+          <input
+            value={pushoverSound}
+            onChange={(e) => setPushoverSound(e.target.value)}
+            placeholder="např. pushover, bugle, siren"
+          />
+        </label>
+
+        <label style={{ gridColumn: '1 / -1' }}>
+          Pushover User Key(s)
+          <textarea
+            value={pushoverUsersInput}
+            onChange={(e) => setPushoverUsersInput(e.target.value)}
+            rows={4}
+            placeholder={'uQiRzpo4DXghDmr9QzzfQu27cmVRsG'}
+            style={{ width: '100%', resize: 'vertical' }}
+          />
+          <small className="muted">Jeden klíč na řádek (nebo oddělené čárkou/středníkem).</small>
+        </label>
       </div>
 
       {invalidEmails.length > 0 && (
         <div style={{ marginTop: 12, color: '#dc2626', fontSize: 14 }}>
           Neplatné emaily: {invalidEmails.join(', ')}
+        </div>
+      )}
+
+      {invalidPushoverUsers.length > 0 && (
+        <div style={{ marginTop: 12, color: '#dc2626', fontSize: 14 }}>
+          Neplatné Pushover User Key: {invalidPushoverUsers.join(', ')}
         </div>
       )}
 
@@ -161,7 +243,7 @@ export function AlertingTab({ notify }: Props) {
       </div>
 
       <p className="muted" style={{ marginTop: 12 }}>
-        Pozn.: i při prázdném seznamu se jako fallback použijí serverové adresy z engine env (ADMIN_EMAIL / SMTP_USER).
+        Pozn.: email fallback je `ADMIN_EMAIL / SMTP_USER`. Pro Pushover musí být na engine nastavený env `PUSHOVER_APP_TOKEN`.
       </p>
     </section>
   )
