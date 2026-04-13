@@ -162,16 +162,39 @@ export function SupportTicketsTab({ notify }: Props) {
   }
 
   async function openAttachment(a: SupportAttachment): Promise<void> {
+    // iOS Safari (and some mobile browsers) will block window.open() if it happens
+    // after an await. So we pre-open a blank tab synchronously, then redirect it.
+    let popup: Window | null = null
     try {
+      popup = window.open('about:blank', '_blank')
+      if (popup) {
+        try {
+          // best-effort harden
+          ;(popup as any).opener = null
+        } catch {
+          // ignore
+        }
+      }
+
       const { data, error } = await supabase.storage
         .from('dpt-support-attachments')
         .createSignedUrl(a.storage_path, 60 * 10)
 
       if (error || !data?.signedUrl) throw error || new Error('Signed URL failed')
 
-      // mobile popup blockers workaround is overkill here; open in same tab is OK
-      window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+      if (popup && !popup.closed) {
+        popup.location.href = data.signedUrl
+      } else {
+        // Fallback: open in same tab
+        window.location.href = data.signedUrl
+      }
     } catch (err) {
+      // If we opened a blank tab and then failed, close it to avoid junk tabs
+      try {
+        popup?.close()
+      } catch {
+        // ignore
+      }
       notify('error', `Otevření přílohy selhalo: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
