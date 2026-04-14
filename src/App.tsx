@@ -237,10 +237,16 @@ function App() {
             : null
         const metadataDirectDealId =
           metadata && typeof metadata.direct_deal_id === 'string' ? metadata.direct_deal_id : null
+        const metadataDirectDealPublicToken =
+          metadata && typeof metadata.direct_deal_public_token === 'string'
+            ? metadata.direct_deal_public_token
+            : null
         const externalOrderId = typeof row.external_order_id === 'string' ? row.external_order_id : ''
         const externalOrderDirectDealId = externalOrderId.match(/^DD-([0-9a-f-]{36})-v\d+$/i)?.[1] || null
         const resolvedDirectDealId = metadataDirectDealId || externalOrderDirectDealId
-        const directDealToken = resolvedDirectDealId ? directDealTokenById.get(resolvedDirectDealId) : null
+        const directDealToken =
+          metadataDirectDealPublicToken ||
+          (resolvedDirectDealId ? directDealTokenById.get(resolvedDirectDealId) : null)
 
         return {
           id: row.id,
