@@ -10,17 +10,37 @@ alter table public.dpt_deals
 alter table public.dpt_deals
   add column if not exists delivery_method text;
 
-alter table public.dpt_deals
-  add constraint if not exists dpt_deals_delivery_method_chk
-  check (delivery_method is null or delivery_method in ('personal','carrier'));
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint c
+    where c.conname = 'dpt_deals_delivery_method_chk'
+      and c.conrelid = 'public.dpt_deals'::regclass
+  ) then
+    alter table public.dpt_deals
+      add constraint dpt_deals_delivery_method_chk
+      check (delivery_method is null or delivery_method in ('personal','carrier'));
+  end if;
+end $$;
 
 -- shipping terms (who pays / how it is handled)
 alter table public.dpt_deals
   add column if not exists shipping_terms text;
 
-alter table public.dpt_deals
-  add constraint if not exists dpt_deals_shipping_terms_chk
-  check (shipping_terms is null or shipping_terms in ('buyer_pays','seller_pays','included','split','other'));
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint c
+    where c.conname = 'dpt_deals_shipping_terms_chk'
+      and c.conrelid = 'public.dpt_deals'::regclass
+  ) then
+    alter table public.dpt_deals
+      add constraint dpt_deals_shipping_terms_chk
+      check (shipping_terms is null or shipping_terms in ('buyer_pays','seller_pays','included','split','other'));
+  end if;
+end $$;
 
 alter table public.dpt_deals
   add column if not exists shipping_carrier text;
