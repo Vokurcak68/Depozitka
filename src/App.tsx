@@ -248,10 +248,15 @@ function App() {
           metadataDirectDealPublicToken ||
           (resolvedDirectDealId ? directDealTokenById.get(resolvedDirectDealId) : null)
 
+        const metadataDealId = metadata && typeof metadata.dealId === 'string' ? metadata.dealId : null
+        const metadataDealViewToken =
+          metadata && typeof metadata.deal_view_token === 'string' ? metadata.deal_view_token : null
+        const resolvedDealId = (row.deal_id as string | null) || metadataDealId
+
         const directDealUrl = directDealToken
           ? `https://www.depozitka.eu/bezpecna-platba/deal/${directDealToken}`
-          : resolvedDirectDealId
-            ? `https://www.depozitka.eu/deal/${resolvedDirectDealId}`
+          : resolvedDealId && metadataDealViewToken
+            ? `https://www.depozitka.eu/deal/${resolvedDealId}?t=${encodeURIComponent(metadataDealViewToken)}`
             : null
 
         return {
