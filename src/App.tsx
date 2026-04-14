@@ -201,9 +201,9 @@ function App() {
               if (typeof fromMetadata === 'string' && fromMetadata.length > 0) return fromMetadata
 
               // fallback for older direct deals where metadata.direct_deal_id is missing
-              // external_order_id format: DD-<deal_uuid>-v<version>
+              // external_order_id format: DD-<deal_id>-v<version>
               const orderId = typeof row.external_order_id === 'string' ? row.external_order_id : ''
-              const match = orderId.match(/^DD-([0-9a-f-]{36})-v\d+$/i)
+              const match = orderId.match(/^DD-(.+)-v\d+$/i)
               return match?.[1] || null
             })
             .filter((id): id is string => !!id),
@@ -242,7 +242,7 @@ function App() {
             ? metadata.direct_deal_public_token
             : null
         const externalOrderId = typeof row.external_order_id === 'string' ? row.external_order_id : ''
-        const externalOrderDirectDealId = externalOrderId.match(/^DD-([0-9a-f-]{36})-v\d+$/i)?.[1] || null
+        const externalOrderDirectDealId = externalOrderId.match(/^DD-(.+)-v\d+$/i)?.[1] || null
         const resolvedDirectDealId = metadataDirectDealId || externalOrderDirectDealId
         const directDealToken =
           metadataDirectDealPublicToken ||
