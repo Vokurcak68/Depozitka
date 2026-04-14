@@ -251,13 +251,21 @@ function App() {
         const metadataDealId = metadata && typeof metadata.dealId === 'string' ? metadata.dealId : null
         const metadataDealViewToken =
           metadata && typeof metadata.deal_view_token === 'string' ? metadata.deal_view_token : null
+        const metadataExternalUrl =
+          metadata && typeof metadata.externalUrl === 'string'
+            ? metadata.externalUrl
+            : metadata && typeof metadata.external_url === 'string'
+              ? metadata.external_url
+              : null
         const resolvedDealId = (row.deal_id as string | null) || metadataDealId
 
         const directDealUrl = directDealToken
           ? `https://www.depozitka.eu/bezpecna-platba/deal/${directDealToken}`
           : resolvedDealId && metadataDealViewToken
             ? `https://www.depozitka.eu/deal/${resolvedDealId}?t=${encodeURIComponent(metadataDealViewToken)}`
-            : null
+            : metadataExternalUrl && /^https?:\/\//i.test(metadataExternalUrl)
+              ? metadataExternalUrl
+              : null
 
         return {
           id: row.id,

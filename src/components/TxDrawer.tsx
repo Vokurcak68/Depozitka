@@ -77,7 +77,7 @@ export function TxDrawer({
             <p>
               <strong>Nabídka:</strong>{' '}
               <a href={tx.directDealUrl} target="_blank" rel="noreferrer">
-                Otevřít nabídku (Direct Deal)
+                Otevřít nabídku
               </a>
             </p>
           )}
