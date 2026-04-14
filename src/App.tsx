@@ -190,7 +190,7 @@ function App() {
       }
 
       const txData = txRes.data || []
-      const directDealIds = Array.from(
+      const directDealCandidates = Array.from(
         new Set(
           txData
             .map((row) => {
@@ -201,7 +201,7 @@ function App() {
               if (typeof fromMetadata === 'string' && fromMetadata.length > 0) return fromMetadata
 
               // fallback for older direct deals where metadata.direct_deal_id is missing
-              // external_order_id format: DD-<deal_id>-v<version>
+              // external_order_id format: DD-<deal_id_or_token>-v<version>
               const orderId = typeof row.external_order_id === 'string' ? row.external_order_id : ''
               const match = orderId.match(/^DD-(.+)-v\d+$/i)
               return match?.[1] || null
@@ -210,20 +210,19 @@ function App() {
         ),
       )
 
-      const directDealTokenById = new Map<string, string>()
-      if (directDealIds.length > 0) {
-        const directDealRes = await supabase
-          .from('dpt_direct_deals')
-          .select('id, public_token')
-          .in('id', directDealIds)
+      const directDealTokenByCandidate = new Map<string, string>()
+      if (directDealCandidates.length > 0) {
+        const [byIdRes, byTokenRes] = await Promise.all([
+          supabase.from('dpt_direct_deals').select('id, public_token').in('id', directDealCandidates),
+          supabase.from('dpt_direct_deals').select('id, public_token').in('public_token', directDealCandidates),
+        ])
 
-        if (!directDealRes.error) {
-          ;(directDealRes.data || []).forEach((deal) => {
-            if (deal?.id && deal?.public_token) {
-              directDealTokenById.set(deal.id, deal.public_token)
-            }
-          })
-        }
+        ;[...(byIdRes.data || []), ...(byTokenRes.data || [])].forEach((deal) => {
+          if (deal?.id && deal?.public_token) {
+            directDealTokenByCandidate.set(deal.id, deal.public_token)
+            directDealTokenByCandidate.set(deal.public_token, deal.public_token)
+          }
+        })
       }
 
       const txMap = new Map<string, string>()
@@ -246,7 +245,7 @@ function App() {
         const resolvedDirectDealId = metadataDirectDealId || externalOrderDirectDealId
         const directDealToken =
           metadataDirectDealPublicToken ||
-          (resolvedDirectDealId ? directDealTokenById.get(resolvedDirectDealId) : null)
+          (resolvedDirectDealId ? directDealTokenByCandidate.get(resolvedDirectDealId) : null)
 
         const metadataDealId = metadata && typeof metadata.dealId === 'string' ? metadata.dealId : null
         const metadataDealViewToken =
