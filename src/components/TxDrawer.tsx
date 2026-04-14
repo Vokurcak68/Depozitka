@@ -52,6 +52,11 @@ export function TxDrawer({
   const noteRequired = change ? transitionRequiresNote(tx.status, change) : false
   const noteEmpty = !note.trim()
 
+  const fallbackDealIdFromOrder = tx.externalOrderId?.match(/^DD-(.+)-v\d+$/i)?.[1] || null
+  const fallbackDirectDealUrl = tx.directDealUrl
+    || (tx.dealId ? `https://www.depozitka.eu/deal/${tx.dealId}` : null)
+    || (fallbackDealIdFromOrder ? `https://www.depozitka.eu/deal/${fallbackDealIdFromOrder}` : null)
+
   return (
     <div className="drawerOverlay" role="presentation" onClick={onClose}>
       <aside className="drawer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -73,10 +78,10 @@ export function TxDrawer({
           <p>
             <strong>Stav:</strong> {statusLabel[tx.status]}
           </p>
-          {tx.directDealUrl && (
+          {fallbackDirectDealUrl && (
             <p>
               <strong>Nabídka:</strong>{' '}
-              <a href={tx.directDealUrl} target="_blank" rel="noreferrer">
+              <a href={fallbackDirectDealUrl} target="_blank" rel="noreferrer">
                 Otevřít nabídku (Direct Deal)
               </a>
             </p>
