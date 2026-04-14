@@ -178,7 +178,7 @@ function App() {
       const txRes = await supabase
         .from('dpt_transactions')
         .select(
-          'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, status, updated_at, shipping_carrier, shipping_tracking_number, shieldtrack_shipment_id, st_score, st_status, dpt_marketplaces(code, name)',
+          'id, transaction_code, marketplace_id, external_order_id, buyer_name, buyer_email, seller_name, seller_email, seller_payout_iban, seller_payout_account_name, seller_payout_bic, seller_payout_source, seller_payout_locked_at, amount_czk, fee_amount_czk, payout_amount_czk, paid_amount, payment_reference, source, deal_id, metadata, status, updated_at, shipping_carrier, shipping_tracking_number, shieldtrack_shipment_id, st_score, st_status, dpt_marketplaces(code, name)',
         )
         .order('created_at', { ascending: false })
         .limit(300)
@@ -189,10 +189,49 @@ function App() {
         return
       }
 
+      const txData = txRes.data || []
+      const directDealIds = Array.from(
+        new Set(
+          txData
+            .map((row) => {
+              if (typeof row.metadata !== 'object' || row.metadata === null) return null
+              const metadata = row.metadata as Record<string, unknown>
+              const directDealId = metadata.direct_deal_id
+              return typeof directDealId === 'string' && directDealId.length > 0 ? directDealId : null
+            })
+            .filter((id): id is string => !!id),
+        ),
+      )
+
+      const directDealTokenById = new Map<string, string>()
+      if (directDealIds.length > 0) {
+        const directDealRes = await supabase
+          .from('dpt_direct_deals')
+          .select('id, public_token')
+          .in('id', directDealIds)
+
+        if (!directDealRes.error) {
+          ;(directDealRes.data || []).forEach((deal) => {
+            if (deal?.id && deal?.public_token) {
+              directDealTokenById.set(deal.id, deal.public_token)
+            }
+          })
+        }
+      }
+
       const txMap = new Map<string, string>()
-      const txRows: Transaction[] = (txRes.data || []).map((row) => {
+      const txRows: Transaction[] = txData.map((row) => {
         txMap.set(row.id, row.transaction_code)
         const marketplace = Array.isArray(row.dpt_marketplaces) ? row.dpt_marketplaces[0] : row.dpt_marketplaces
+
+        const metadata =
+          typeof row.metadata === 'object' && row.metadata !== null
+            ? (row.metadata as Record<string, unknown>)
+            : null
+        const metadataDirectDealId =
+          metadata && typeof metadata.direct_deal_id === 'string' ? metadata.direct_deal_id : null
+        const directDealToken = metadataDirectDealId ? directDealTokenById.get(metadataDirectDealId) : null
+
         return {
           id: row.id,
           transactionCode: row.transaction_code,
@@ -213,6 +252,9 @@ function App() {
           payoutAmountCzk: Number(row.payout_amount_czk),
           paidAmountCzk: Number(row.paid_amount || 0),
           paymentReference: row.payment_reference || '',
+          source: row.source || 'marketplace',
+          dealId: row.deal_id || null,
+          directDealUrl: directDealToken ? `https://depozitka.eu/bezpecna-platba/deal/${directDealToken}` : null,
           status: row.status,
           updatedAt: row.updated_at,
           shippingCarrier: row.shipping_carrier || '',

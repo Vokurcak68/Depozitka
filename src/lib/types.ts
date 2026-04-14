@@ -38,6 +38,9 @@ export interface Transaction {
   payoutAmountCzk: number
   paidAmountCzk: number
   paymentReference: string
+  source: string
+  dealId: string | null
+  directDealUrl: string | null
   status: EscrowStatus
   updatedAt: string
   shippingCarrier: string

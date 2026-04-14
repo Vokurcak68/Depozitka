@@ -73,6 +73,14 @@ export function TxDrawer({
           <p>
             <strong>Stav:</strong> {statusLabel[tx.status]}
           </p>
+          {tx.directDealUrl && (
+            <p>
+              <strong>Nabídka:</strong>{' '}
+              <a href={tx.directDealUrl} target="_blank" rel="noreferrer">
+                Otevřít nabídku (Direct Deal)
+              </a>
+            </p>
+          )}
           <p>
             <strong>Kupující:</strong> {tx.buyerName} ({tx.buyerEmail})
           </p>
