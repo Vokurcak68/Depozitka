@@ -194,10 +194,17 @@ function App() {
         new Set(
           txData
             .map((row) => {
-              if (typeof row.metadata !== 'object' || row.metadata === null) return null
-              const metadata = row.metadata as Record<string, unknown>
-              const directDealId = metadata.direct_deal_id
-              return typeof directDealId === 'string' && directDealId.length > 0 ? directDealId : null
+              const fromMetadata =
+                typeof row.metadata === 'object' && row.metadata !== null
+                  ? (row.metadata as Record<string, unknown>).direct_deal_id
+                  : null
+              if (typeof fromMetadata === 'string' && fromMetadata.length > 0) return fromMetadata
+
+              // fallback for older direct deals where metadata.direct_deal_id is missing
+              // external_order_id format: DD-<deal_uuid>-v<version>
+              const orderId = typeof row.external_order_id === 'string' ? row.external_order_id : ''
+              const match = orderId.match(/^DD-([0-9a-f-]{36})-v\d+$/i)
+              return match?.[1] || null
             })
             .filter((id): id is string => !!id),
         ),
@@ -230,7 +237,10 @@ function App() {
             : null
         const metadataDirectDealId =
           metadata && typeof metadata.direct_deal_id === 'string' ? metadata.direct_deal_id : null
-        const directDealToken = metadataDirectDealId ? directDealTokenById.get(metadataDirectDealId) : null
+        const externalOrderId = typeof row.external_order_id === 'string' ? row.external_order_id : ''
+        const externalOrderDirectDealId = externalOrderId.match(/^DD-([0-9a-f-]{36})-v\d+$/i)?.[1] || null
+        const resolvedDirectDealId = metadataDirectDealId || externalOrderDirectDealId
+        const directDealToken = resolvedDirectDealId ? directDealTokenById.get(resolvedDirectDealId) : null
 
         return {
           id: row.id,
