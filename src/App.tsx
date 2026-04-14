@@ -248,6 +248,12 @@ function App() {
           metadataDirectDealPublicToken ||
           (resolvedDirectDealId ? directDealTokenById.get(resolvedDirectDealId) : null)
 
+        const directDealUrl = directDealToken
+          ? `https://www.depozitka.eu/bezpecna-platba/deal/${directDealToken}`
+          : resolvedDirectDealId
+            ? `https://www.depozitka.eu/deal/${resolvedDirectDealId}`
+            : null
+
         return {
           id: row.id,
           transactionCode: row.transaction_code,
@@ -270,7 +276,7 @@ function App() {
           paymentReference: row.payment_reference || '',
           source: row.source || 'marketplace',
           dealId: row.deal_id || null,
-          directDealUrl: directDealToken ? `https://depozitka.eu/bezpecna-platba/deal/${directDealToken}` : null,
+          directDealUrl,
           status: row.status,
           updatedAt: row.updated_at,
           shippingCarrier: row.shipping_carrier || '',
